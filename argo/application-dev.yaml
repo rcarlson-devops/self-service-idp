@@ -7,12 +7,12 @@ spec:
   project: default
   source:
     # Replace with your actual GitOps repo URL
-    repoURL: https://github.com/rcarlson-devops/self-service-idp.git
+    repoURL: https://github.com/OWNER/REPO.git
     targetRevision: main
-    path: charts/hello-world
+    path: hello-world-app/charts/hello-world
     helm:
       valueFiles:
-        - values-dev.yaml
+        - environments/dev/values-dev.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: hello-world-dev

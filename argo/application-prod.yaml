@@ -6,12 +6,12 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/rcarlson-devops/self-service-idp.git
+    repoURL: https://github.com/OWNER/REPO.git
     targetRevision: main
-    path: charts/hello-world
+    path: hello-world-app/charts/hello-world
     helm:
       valueFiles:
-        - values-prod.yaml
+        - environments/prod/values-prod.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: hello-world-prod
