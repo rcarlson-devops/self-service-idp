@@ -1,0 +1,19 @@
+# helm upgrade --install hello-world ./helm/hello-world \
+#   -f ./helm/hello-world/values-staging.yaml \
+#   --namespace hello-world-staging --create-namespace
+
+replicaCount: 2
+
+image:
+  tag: staging-latest
+  pullPolicy: Always   # floating tag - must always re-pull, see README caveat
+
+environment: staging
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 300m
+    memory: 128Mi

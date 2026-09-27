@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-world-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/rcarlson-devops/self-service-idp.git
+    targetRevision: main
+    path: charts/hello-world
+    helm:
+      valueFiles:
+        - values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hello-world-prod
+  # Deliberately no `automated:` block - prod changes (a bumped image tag,
+  # a config change) show up as "OutOfSync" in Argo CD and require a human
+  # to click Sync. This is an explicit approval gate, not an oversight.
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

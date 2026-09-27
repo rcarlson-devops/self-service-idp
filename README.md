@@ -56,17 +56,6 @@ A developer fills out one form in a self-service portal. That single action:
 5. Watch the deployment sync automatically in Argo CD
 6. Your service is live, with metrics already visible in Grafana
 
-## Before / After
-
-<!-- This is the number a recruiter remembers. Fill in once you've timed both the manual and self-service paths. -->
-
-| | Before (manual) | After (this platform) |
-|---|---|---|
-| Time to a running service with infra | ~2 days | ~X minutes |
-| People/teams involved | Developer + ops ticket + review | Developer, alone |
-| Guardrails applied | Manual review, inconsistent | Automatic, every time |
-| Secrets in Git | Sometimes, by accident | Never — enforced |
-
 ## What's Next at Scale
 
 <!-- Show product thinking — this is what separates "I did a tutorial" from "I think about platforms." A few sentences each is enough. -->
@@ -93,4 +82,4 @@ kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/st
 
 ## About This Project
 
-Built by [Robert Carlson](https://www.linkedin.com/in/YOUR-LINKEDIN) as a hands-on demonstration of platform engineering practices — self-service infrastructure, GitOps, policy-as-code, and observability by default — following 10+ years in DevOps and cloud engineering across AWS, Azure, and Kubernetes environments.
+Built by [Robert Carlson](https://www.linkedin.com/in/robertjohncarlson) as a hands-on demonstration of platform engineering practices — self-service infrastructure, GitOps, policy-as-code, and observability by default — following 10+ years in DevOps and cloud engineering across AWS, Azure, and Kubernetes environments.

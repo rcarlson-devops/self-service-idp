@@ -1,0 +1,22 @@
+# helm upgrade --install hello-world ./helm/hello-world \
+#   -f ./helm/hello-world/values-prod.yaml \
+#   --namespace hello-world-prod --create-namespace
+#
+# The image.tag here is pinned to a tested semver version - never `latest`.
+# Bump it deliberately (PR + review) via the `promote` GitHub Actions
+# workflow, which retags an already-tested image rather than rebuilding it.
+
+replicaCount: 3
+
+image:
+  tag: "1.0.0"
+
+environment: prod
+
+resources:
+  requests:
+    cpu: 150m
+    memory: 96Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

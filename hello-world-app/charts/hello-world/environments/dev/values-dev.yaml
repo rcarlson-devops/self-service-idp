@@ -1,0 +1,10 @@
+# helm upgrade --install hello-world ./helm/hello-world \
+#   -f ./helm/hello-world/values-dev.yaml \
+#   --namespace hello-world-dev --create-namespace
+
+replicaCount: 1
+
+image:
+  tag: dev-latest
+
+environment: dev
