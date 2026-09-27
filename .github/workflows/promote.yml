@@ -1,0 +1,65 @@
+name: promote
+
+# Retags an existing image instead of rebuilding it, so the artifact that
+# gets promoted to staging/prod is byte-for-byte what was already tested in
+# dev. Run from the Actions tab: Actions -> promote -> Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: "Existing tag to promote (e.g. sha-abc1234 or staging-latest)"
+        required: true
+      target_environment:
+        description: "Where to promote it"
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod
+      version:
+        description: "Required for prod only: semver tag to publish, e.g. 1.0.0"
+        required: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/hello-world
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Validate inputs
+        if: ${{ inputs.target_environment == 'prod' && inputs.version == '' }}
+        run: |
+          echo "::error::A 'version' input is required when promoting to prod."
+          exit 1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set target tag
+        id: target
+        run: |
+          if [ "${{ inputs.target_environment }}" = "staging" ]; then
+            echo "tag=staging-latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Retag image (no rebuild)
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.target.outputs.tag }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.source_tag }}
+
+      - name: Summary
+        run: |
+          echo "Promoted ${{ inputs.source_tag }} -> ${{ steps.target.outputs.tag }} (${{ inputs.target_environment }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "Next: update hello-world-app/charts/hello-world/environments/${{ inputs.target_environment }}/values-${{ inputs.target_environment }}.yaml's image.tag to '${{ steps.target.outputs.tag }}', commit, and let Argo CD sync." >> "$GITHUB_STEP_SUMMARY"
