@@ -73,6 +73,18 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.vars.outputs.sha_short }}
             ${{ steps.meta.outputs.tags }}
 
+      - name: Update values-dev.yaml
+        run: |
+          yq -i '.image.tag = "${{ steps.meta.outputs.version }}"' ../charts/hello-world/environments/dev/values-dev.yaml
+
+      - name: Commit and push updated values-dev.yaml
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ../charts/hello-world/environments/dev/values-dev.yaml
+          git commit -m "Update values-dev.yaml with new image tag"
+          git push origin HEAD:"${{ steps.meta.outputs.version }}"
+    
       - name: Summary
         run: |
           echo "Pushed sha-${{ steps.vars.outputs.sha_short }} and ${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
