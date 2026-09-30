@@ -7,7 +7,8 @@ name: build-and-push
 
 on:
   push:
-    branches: [main]
+    branches:
+      - 'feature-*'
     paths:
       - "hello-world-app/app/**"
       - ".github/workflows/build-and-push.yml"
@@ -53,6 +54,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Extract branch name
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/hello-world
+          tags: |
+            type=ref,event=branch
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -62,8 +71,8 @@ jobs:
             VERSION=sha-${{ steps.vars.outputs.sha_short }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.vars.outputs.sha_short }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-latest
+            ${{ steps.meta.outputs.tags }}
 
       - name: Summary
         run: |
-          echo "Pushed sha-${{ steps.vars.outputs.sha_short }} and dev-latest to ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed sha-${{ steps.vars.outputs.sha_short }} and ${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
