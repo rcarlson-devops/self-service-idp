@@ -1,0 +1,11 @@
+{{ include "hello-world.fullname" . }} ({{ .Values.environment }}) has been deployed to namespace "{{ .Release.Namespace }}".
+
+Check rollout status:
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "hello-world.fullname" . }}
+
+Port-forward to try it locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "hello-world.fullname" . }} 8080:{{ .Values.service.port }}
+  curl localhost:8080/
+  curl localhost:8080/version
+
+Image deployed: {{ .Values.image.repository }}:{{ .Values.image.tag }}

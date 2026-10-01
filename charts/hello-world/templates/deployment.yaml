@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hello-world.fullname" . }}
+  labels:
+    {{- include "hello-world.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "hello-world.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hello-world.labels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ include "hello-world.name" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.probes.port }}
+          env:
+            - name: PORT
+              value: {{ .Values.probes.port | quote }}
+            - name: ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: SHUTDOWN_TIMEOUT_SECONDS
+              value: {{ .Values.shutdownTimeoutSeconds | quote }}
+            - name: PRESTOP_DELAY_SECONDS
+              value: {{ .Values.lifecycle.preStopSleepSeconds | quote }}
+          # Uses httpGet rather than exec: the runtime image is distroless
+          # and has no shell or `sleep` binary, so an exec-based preStop
+          # would silently do nothing. Calling the app's own
+          # /internal/prestop endpoint gets the same delay with no shell
+          # dependency — see server.go's handlePreStop.
+          lifecycle:
+            preStop:
+              httpGet:
+                path: /internal/prestop
+                port: {{ .Values.probes.port }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readinessPath }}
+              port: {{ .Values.probes.port }}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.livenessPath }}
+              port: {{ .Values.probes.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
