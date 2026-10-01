@@ -1,3 +1,5 @@
+# App-of-apps root. This is the only Argo CD resource applied by hand
+# (bootstrap/bootstrap.sh); everything under argocd/apps/ is discovered from Git.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -6,9 +8,8 @@ metadata:
 spec:
   project: default
   source:
-    # repoURL: https://github.com/rcarlson-devops/self-service-idp.git
     repoURL: https://github.com/rcarlson-devops/self-service-idp.git
-    targetRevision: HEAD
+    targetRevision: main
     path: argocd/apps
     directory:
       recurse: true
