@@ -1,0 +1,23 @@
+# k3d cluster definition for the platform. Recreates the shape of the original
+# hand-built cluster (1 server, 2 agents) with the settings pinned.
+#
+#   k3d cluster create --config bootstrap/k3d-config.yaml
+#
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: dev-cluster
+servers: 1
+agents: 2
+image: rancher/k3s:v1.35.5-k3s1   # pinned; was the k3d v5.9.0 default
+kubeAPI:
+  host: "127.0.0.1"
+  hostIP: "127.0.0.1"
+  hostPort: "6443"                # fixed (original used a random port) and localhost-only
+ports:
+  # Argo CD UI. Host :8080 -> k3d load balancer -> :8888 on the nodes, where
+  # k3s ServiceLB exposes the argocd-server LoadBalancer service
+  # (see bootstrap/argocd/kustomization.yaml). Bound to localhost only.
+  - port: 127.0.0.1:8080:8888
+    nodeFilters:
+      - loadbalancer

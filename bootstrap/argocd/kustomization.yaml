@@ -1,0 +1,35 @@
+# Argo CD install, pinned, plus the one local customisation: expose
+# argocd-server as a LoadBalancer on 8888/8443 so the k3d port mapping
+# (localhost:8080 -> :8888) reaches the UI. This replaces a hand edit that
+# previously existed only in the live cluster.
+#
+# Apply with server-side apply (the ApplicationSet CRD is too large for
+# client-side apply):
+#   kubectl apply -n argocd -k bootstrap/argocd --server-side --force-conflicts
+#
+# To upgrade Argo CD, change the version tag in the URL below. It is the only
+# place the version lives.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: argocd
+resources:
+  - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.3/manifests/install.yaml
+patches:
+  - target:
+      kind: Service
+      name: argocd-server
+    patch: |-
+      - op: add
+        path: /spec/type
+        value: LoadBalancer
+      - op: replace
+        path: /spec/ports
+        value:
+          - name: http
+            port: 8888
+            protocol: TCP
+            targetPort: 8080
+          - name: https
+            port: 8443
+            protocol: TCP
+            targetPort: 8080
