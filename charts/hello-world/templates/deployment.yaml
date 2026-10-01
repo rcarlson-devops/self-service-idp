@@ -21,7 +21,7 @@ spec:
       {{- end }}
       containers:
         - name: {{ include "hello-world.name" . }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ required "image.tag must be set; see environments/<env>/values-<env>.yaml" .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.probes.port }}

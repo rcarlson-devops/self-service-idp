@@ -2,7 +2,11 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/rcarlson-devops/hello-world
-  tag: dev-latest
+  # Deliberately empty: there is no sensible chart-wide default. Every image is
+  # an immutable sha-<short-sha> tag, set per environment in
+  # environments/<env>/values-<env>.yaml (CI updates it on each build).
+  # Rendering without a tag fails with an error instead of deploying a bad image.
+  tag: ""
   pullPolicy: IfNotPresent
 
 environment: dev
