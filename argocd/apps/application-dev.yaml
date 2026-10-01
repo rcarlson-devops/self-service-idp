@@ -8,7 +8,7 @@ spec:
   source:
     # Replace with your actual GitOps repo URL
     # repoURL: https://github.com/rcarlson-devops/self-service-idp.git
-    repoURL: git@github.com:rcarlson-devops/self-service-idp.git    
+    repoURL: https://github.com/rcarlson-devops/self-service-idp.git    
     targetRevision: main
     path: charts/hello-world
     helm:
