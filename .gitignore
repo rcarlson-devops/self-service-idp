@@ -1,0 +1,26 @@
+# Archives (e.g. a tarball made of this directory by accident)
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local Go build output (anchored so charts/hello-world/ is NOT ignored)
+/app/hello-world
+/app/*.test
+/app/*.out
+
+# Local config and credentials: never commit these
+.env
+.env.*
+*.pem
+*.key
+kubeconfig
+kubeconfig.yaml
+*.kubeconfig

@@ -4,6 +4,21 @@
 
 ---
 
+## Project Status
+
+Built in phases; this table is the honest picture of what exists today.
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1. Foundation | k3d cluster, Argo CD (app-of-apps), containerized Go service, CI to GHCR, GitOps deploy | **Done** |
+| 2. Self-service infrastructure | Crossplane + CloudNativePG: namespace, RBAC, and a Postgres database from one claim | Planned |
+| 3. Developer portal | Backstage software template: repo + CI + infra from one form | Planned |
+| 4. Guardrails | Kyverno policies, External Secrets + Vault | Planned |
+| 5. Observability | Prometheus + Grafana by default for every service | Planned |
+| 6. Docs and metrics | Architecture diagram, golden path, before/after numbers | Ongoing |
+
+**Measured so far:** the entire platform (cluster, Argo CD, and the app) rebuilds from nothing in under 3 minutes with a single script.
+
 ## The Problem
 
 <!-- Replace with 3-5 sentences framed around a real org's pain point. Example prompts to answer: -->
@@ -43,7 +58,7 @@ A developer fills out one form in a self-service portal. That single action:
 | Secrets | External Secrets Operator + Vault (dev) | No plaintext secrets ever committed to Git |
 | Observability | Prometheus + Grafana | Metrics available by default for anything deployed through the platform |
 | CI | GitHub Actions | Standard, free, widely recognized |
-| Cluster | Kind / k3d | Reproducible, runs locally, no cloud cost to evaluate |
+| Cluster | k3d (k3s in Docker) | Reproducible, runs locally, no cloud cost to evaluate |
 
 ## The Golden Path: New Service in Under 10 Minutes
 
@@ -67,18 +82,62 @@ A developer fills out one form in a self-service portal. That single action:
 
 ## Running This Locally
 
-<!-- Fill in once you've nailed down exact setup steps. Keep it copy-pasteable. -->
+Everything outside the bootstrap script is deployed by Argo CD from this repo.
+
+**Prerequisites:** Docker, [k3d](https://k3d.io) v5.x, and `kubectl`.
+
+**1. Clone the repo**
 
 ```bash
-# 1. Spin up a local cluster
-kind create cluster --name platform-demo
-
-# 2. Install Argo CD
-kubectl create namespace argocd
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-
-# ...continue with Crossplane, Backstage, Kyverno, ESO setup
+git clone https://github.com/rcarlson-devops/self-service-idp.git
+cd self-service-idp
 ```
+
+**2. Provide registry credentials.** The sample app's container image is in a private GHCR package, so the cluster needs a pull secret. Create a GitHub personal access token with the `read:packages` scope and export it. (This is a temporary manual step; it moves to External Secrets in Phase 4.)
+
+```bash
+export GHCR_USER=<your-github-username>
+export GHCR_TOKEN=<your-token>
+```
+
+**3. Run the bootstrap**
+
+```bash
+./bootstrap/bootstrap.sh
+```
+
+This creates the k3d cluster (`bootstrap/k3d-config.yaml`), installs a pinned version of Argo CD (`bootstrap/argocd/`), creates the pull secret, and applies `argocd/root.yaml`. From that point Argo CD pulls everything else from Git. It is safe to re-run.
+
+**4. Open Argo CD**
+
+The UI is at <https://localhost:8080> (self-signed certificate). Log in as `admin` with the generated password:
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d; echo
+```
+
+**5. Check the sample app**
+
+```bash
+kubectl -n argocd get applications          # root and hello-world-dev should be Synced / Healthy
+kubectl -n hello-world-dev get pods
+kubectl -n hello-world-dev port-forward svc/hello-world 9090:80
+curl localhost:9090/version
+```
+
+**Tear down**
+
+```bash
+k3d cluster delete dev-cluster
+```
+
+### How a code change reaches the cluster
+
+1. Push a change under `app/` to `main`.
+2. GitHub Actions vets, tests, builds the image, and pushes it to GHCR tagged `sha-<short-sha>`.
+3. The workflow commits that tag to `environments/dev/values-dev.yaml`.
+4. Argo CD detects the new commit and rolls out the new image. No `kubectl apply` anywhere.
 
 ## About This Project
 

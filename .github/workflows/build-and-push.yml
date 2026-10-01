@@ -1,9 +1,13 @@
 name: build-and-push
 
-# Builds and tests the app on every push to main, then publishes the image
-# under two tags: an immutable sha-<short-sha> (what promote.yml retags
-# later) and dev-latest (what the dev environment tracks, so dev updates
-# automatically on every merge).
+# CI half of the GitOps loop. On every push to main that touches app/ (or this
+# file), it:
+#   1. vets and tests the Go app,
+#   2. builds the image and pushes it to GHCR as an immutable sha-<short-sha> tag,
+#   3. commits that tag into environments/dev/values-dev.yaml.
+# Argo CD watches that file and rolls the new image out to the dev cluster; CI
+# never talks to the cluster. The bot commit only touches environments/, which
+# is outside the path filter below, so it does not re-trigger this workflow.
 
 on:
   push:
