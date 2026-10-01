@@ -1,3 +1,6 @@
+# Deploys the hello-world chart to the dev environment.
+# environments/dev/values-dev.yaml is updated by CI (build-and-push workflow)
+# with the new image tag, which is what triggers a rollout.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -6,9 +9,7 @@ metadata:
 spec:
   project: default
   source:
-    # Replace with your actual GitOps repo URL
-    # repoURL: https://github.com/rcarlson-devops/self-service-idp.git
-    repoURL: https://github.com/rcarlson-devops/self-service-idp.git    
+    repoURL: https://github.com/rcarlson-devops/self-service-idp.git
     targetRevision: main
     path: charts/hello-world
     helm:
