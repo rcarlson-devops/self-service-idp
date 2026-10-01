@@ -211,3 +211,5 @@ That last step is the Phase 1 exit criteria — capture a screenshot of the
 Argo CD sync once it happens; you'll want it for the README/portfolio later.
 The promotion flow above is worth its own screenshot too — it's a strong
 answer to "how do you handle releases across environments?" in an interview.
+
+Version bump
