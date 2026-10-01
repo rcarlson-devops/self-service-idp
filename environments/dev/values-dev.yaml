@@ -4,5 +4,5 @@
 
 replicaCount: 1
 image:
-  tag: sha-5bc9e3c
+  tag: sha-30cc4ca
 environment: dev
