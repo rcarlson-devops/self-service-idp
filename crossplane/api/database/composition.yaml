@@ -48,6 +48,31 @@ spec:
               storage:
                 {{- $sizeDict := dict "small" "1Gi" "medium" "2Gi" "large" "3Gi" }}
                 size: "{{ get $sizeDict .observed.composite.resource.spec.size }}"
+    - step: create-cluster-rolebinding
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            metadata:
+              name: "{{ .observed.composite.resource.metadata.name }}-rolebinding-db"
+              labels:
+                team: "{{ .observed.composite.resource.spec.team }}"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: rolebinding
+            subjects:
+              - kind: User
+                name: "{{ .observed.composite.resource.spec.team }}"
+                namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+            roleRef:
+              kind: ClusterRole
+              name: edit
+              apiGroup: rbac.authorization.k8s.io
     - step: auto-detect-ready-composed-resources
       functionRef:
         name: auto-ready
@@ -61,3 +86,4 @@ spec:
           - sequence:
               - namespace
               - postgres-instance
+              - rolebinding
