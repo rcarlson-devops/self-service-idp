@@ -6,6 +6,9 @@ metadata:
     rbac.crossplane.io/aggregate-to-crossplane: "true"
 rules:
 - apiGroups: ["postgresql.cnpg.io"]
-  resources: ["namespaces", "clusters", "clusters/status"]
+  resources: ["clusters", "clusters/status"]
   verbs:
   - "*"
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["*"]
