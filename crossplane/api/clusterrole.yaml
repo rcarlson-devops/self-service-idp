@@ -13,9 +13,8 @@ rules:
   resources: ["namespaces"]
   verbs: ["*"]
 - apiGroups: ["rbac.authorization.k8s.io"]
-  resources: ["rolebindings", "rolebindings/status"]
+  resources: ["rolebindings"]
   verbs: ["create", "update", "delete", "patch", "get", "list", "watch"]
 - apiGroups: ["rbac.authorization.k8s.io"]
-  resources: ["clusterrole", "clusterrole/status"]
+  resources: ["clusterroles"]
   verbs: ["bind"]
-
