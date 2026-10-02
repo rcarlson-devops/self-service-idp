@@ -25,3 +25,25 @@ spec:
                 team: "{{ .observed.composite.resource.spec.team }}"
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: namespace
+    - step: create-a-postgres-database
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: postgresql.cnpg.io/v1
+            kind: Cluster
+            metadata:
+              name: "{{ .observed.composite.resource.metadata.name }}-db"
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+              labels:
+                team: "{{ .observed.composite.resource.spec.team }}"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: postgres-instance
+            spec:
+              {{ $sizeDict := dict "small" "1Gi" "medium" "2Gi" "large" "3Gi" }}
+              size: "{{ get $sizeDict .observed.composite.resource.spec.size }}"
+              instances: {{ .observed.composite.resource.spec.instances }}
