@@ -55,8 +55,8 @@ Each problem is written as symptom, cause, and how it was found or fixed. These 
 
 ### 2. A rule that was accepted but granted nothing
 - **Symptom:** Namespace creation still forbidden after adding the role.
-- **Cause:** I had listed `namespaces` under the `postgresql.cnpg.io` API group. A rule applies every resource to every listed group, and Namespaces live in the core group (`""`). Also, `clusters/status` and `namespaces/status` are separate resource strings from `clusters` and `namespaces`.
-- **Fix:** one rule per API group, with the `/status` subresources included.
+- **Cause:** I had listed `namespaces` under the `postgresql.cnpg.io` API group. A rule applies every resource to every listed group, and Namespaces live in the core group (`""`). Also, subresources such as `clusters/status` are separate resource strings from `clusters`.
+- **Fix:** one rule per API group, with `clusters/status` included. (The final role has no `namespaces/status` entry, even though a Crossplane warning once asked for it, and provisioning works without it.)
 - **Lesson:** Kubernetes accepts rules that match nothing without any warning. The error messages list exactly what Crossplane asks for, so copy from them. Also, the Cluster error was masking the Namespace error, since Crossplane reports one failure per reconcile.
 
 ### 3. Events can be stale
@@ -83,13 +83,20 @@ Each problem is written as symptom, cause, and how it was found or fixed. These 
 ### 7. The RoleBinding, four separate failures
 1. **No namespace on the object.** The XR is cluster-scoped, so a namespaced composed resource needs an explicit `metadata.namespace`. Errors: "empty namespace may not be set when a resource name is provided".
 2. **Missing verbs.** The Crossplane warning listed `update` and `delete` as missing on `rolebindings`.
-3. **Privilege escalation prevention.** Kubernetes refused to create a binding to `edit` because Crossplane didn't hold all of `edit`'s permissions. The error printed the entire role's contents. Fix: the `bind` verb on `clusterroles`, restricted with `resourceNames` to the one role. Without `resourceNames`, Crossplane could bind `cluster-admin`.
+3. **Privilege escalation prevention.** Kubernetes refused to create a binding to `edit` because Crossplane didn't hold all of `edit`'s permissions. The error printed the entire role's contents. Fix: the `bind` verb on `clusterroles`, restricted with `resourceNames` to the one role. Without `resourceNames`, Crossplane could bind `cluster-admin`. (My first version left `resourceNames` out; see #9.)
 4. **Readiness.** A RoleBinding has no status, so `function-auto-ready` (which checks for a `Ready` condition on kinds it doesn't know) never marked it ready. Fix: the `gotemplating.fn.crossplane.io/ready: "True"` annotation on that resource only. It's accurate there, because an existing RoleBinding is as ready as it can be, and would be wrong on the database. I confirmed the annotation was needed, after finding a source claiming otherwise; the package docs and the live cluster both disagreed with it.
 
 ### 8. Subject kind: `User` instead of `Group`
 - **Symptom:** The RoleBinding existed, but `kubectl auth can-i get pods --as=anyone --as-group=example-team` said `no`.
 - **Cause:** a `User` subject only matches an identity with that exact user name. `--as-group` presents group membership.
 - **Fix:** `kind: Group` with `apiGroup: rbac.authorization.k8s.io`.
+
+### 9. The `bind` rule was too wide, and a test caught it
+- **Symptom:** while closing out the phase, `kubectl auth can-i bind clusterroles/cluster-admin --as=system:serviceaccount:crossplane-system:crossplane` said `yes`. It should have said `no`.
+- **Cause:** the `clusterroles` rule had the `bind` verb but no `resourceNames`, so Crossplane could bind any ClusterRole in the cluster. Provisioning worked fine, which is why nothing had flagged it. A wildcard I suspected on the CNPG `clusters` rule was a red herring: it only covers that API group and resource.
+- **Fix:** add `resourceNames: ["edit"]` to that rule.
+- **Verified after the fix:** `can-i bind` says `yes` for `clusterroles/edit` and `no` for both `clusterroles/cluster-admin` and a made-up role name. The made-up name matters, because it shows the restriction is by name and not a special case for `cluster-admin`.
+- **Lesson:** a permission that works is not evidence that it's narrow. Test the negative cases for any security claim before stating it.
 
 ## Validation tests
 
@@ -101,9 +108,11 @@ I deleted the cluster and ran `bootstrap.sh`. The cluster came up with every App
 
 ## Still to verify
 
-- [ ] `kubectl auth can-i bind clusterroles/cluster-admin --as=system:serviceaccount:crossplane-system:crossplane` returns `no`
-- [ ] `kubectl auth can-i get pods -n kube-system --as=anyone --as-group=example-team` returns `no`
-- [ ] The RoleBinding currently waits for the database. Decide whether to split it into its own sequencer rule (namespace, then RoleBinding), and re-time if so.
+- [x] `kubectl auth can-i bind clusterroles/cluster-admin --as=system:serviceaccount:crossplane-system:crossplane` returns `no` (after the `resourceNames` fix in #9; it said `yes` before)
+- [x] `kubectl auth can-i bind clusterroles/made-up-name ...` returns `no`, and `bind clusterroles/edit` returns `yes`
+- [x] `kubectl auth can-i get pods -n kube-system --as=anyone --as-group=example-team` returns `no`
+- [x] RoleBinding sequencing: decided to leave it chained behind the database (it waits for both the namespace and the database), and not to split it into its own rule.
+- [ ] After the `resourceNames` fix, delete and re-apply the example XR and confirm the RoleBinding is still created and the XR reaches `READY=True`, and that the `--as-group` check in the team namespace still says `yes`.
 
 ## What I'd do at scale
 
