@@ -62,6 +62,7 @@ For the example request above, once `READY` shows `True`:
 | What | Name | Where |
 |---|---|---|
 | Namespace | `example-postgresdatabase-db` | Cluster-wide |
+| Team access | RoleBinding `example-postgresdatabase-rolebinding-db` | In that namespace. Grants the group named by `spec.team` the `edit` role there. |
 | Postgres cluster | `postgres-db` | In that namespace. The name is the same in every namespace. |
 | Credentials | Secret `postgres-db-app` | In that namespace |
 | Primary (reads and writes) | Service `postgres-db-rw` | In that namespace |
@@ -72,6 +73,10 @@ For the example request above, once `READY` shows `True`:
 Connect applications to the `-rw` Service for anything that writes, and read the credentials from the `-app` Secret. From another namespace, the primary is reachable at `postgres-db-rw.<namespace>.svc`.
 
 The Cluster name is fixed, so these Secret and Service names are the same for every database you request. Only the namespace changes.
+
+### Who can access it
+
+Members of the group named in `spec.team` get the built-in `edit` role in the database's namespace, and nowhere else. They can work with the workloads, Services, and Secrets there (including reading the credentials Secret), but they cannot change role bindings or access other namespaces. Group membership comes from your identity provider; this request only says which group gets access.
 
 ### Checking status
 
@@ -91,7 +96,7 @@ Deleting the request removes the namespace and everything in it, **including the
 
 ## Not yet implemented
 
-- **Team access (RBAC):** the namespace is created, but per-team roles are not yet part of the request.
+- **Finer-grained access:** every request grants the team group the same `edit` role. Read-only or admin roles, and per-person access, are not configurable yet.
 - **Guardrails:** policy checks (no root containers, required labels) arrive in Phase 4.
 - **Secrets management:** credentials live in the generated Secret; integration with an external secrets store arrives in Phase 4.
 - **Observability:** metrics and dashboards arrive in Phase 5.
