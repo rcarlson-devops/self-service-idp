@@ -60,6 +60,7 @@ spec:
             apiVersion: rbac.authorization.k8s.io/v1
             kind: RoleBinding
             metadata:
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
               name: "{{ .observed.composite.resource.metadata.name }}-rolebinding-db"
               labels:
                 team: "{{ .observed.composite.resource.spec.team }}"
@@ -68,7 +69,6 @@ spec:
             subjects:
               - kind: User
                 name: "{{ .observed.composite.resource.spec.team }}"
-                namespace: "{{ .observed.composite.resource.metadata.name }}-db"
             roleRef:
               kind: ClusterRole
               name: edit
