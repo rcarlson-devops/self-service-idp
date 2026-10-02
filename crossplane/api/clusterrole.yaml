@@ -15,4 +15,7 @@ rules:
 - apiGroups: ["rbac.authorization.k8s.io"]
   resources: ["rolebindings", "rolebindings/status"]
   verbs: ["create", "update", "delete", "patch", "get", "list", "watch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterrolebindings", "clusterrolebindings/status"]
+  verbs: ["bind"]
 
