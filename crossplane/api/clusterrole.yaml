@@ -14,5 +14,5 @@ rules:
   verbs: ["*"]
 - apiGroups: ["rbac.authorization.k8s.io"]
   resources: ["rolebindings", "rolebindings/status"]
-  verbs: ["create", "updated", "patch", "get", "list", "watch"]
+  verbs: ["create", "update", "patch", "get", "list", "watch"]
 
