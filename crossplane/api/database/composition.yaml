@@ -48,4 +48,13 @@ spec:
               storage:
                 {{- $sizeDict := dict "small" "1Gi" "medium" "2Gi" "large" "3Gi" }}
                 size: "{{ get $sizeDict .observed.composite.resource.spec.size }}"
-              
+    - step: sequence-creation
+      functionRef:
+        name: function-sequencer
+      input:
+        apiVersion: sequencer.fn.crossplane.io/v1beta1
+        kind: Input
+        rules:
+          - sequence:
+              - namespace
+              - postgres-instance
