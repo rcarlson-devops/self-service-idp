@@ -1,0 +1,27 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: database-composition
+spec:
+  compositeTypeRef:
+    apiVersion: rcarlsondevops.org/v1alpha1
+    kind: PostgresDatabase
+  mode: Pipeline
+  pipeline:
+    - step: create-a-namespace
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: "{{ .observed.composite.resource.metadata.name }}-db"
+              labels:
+                team: "{{ .observed.composite.resource.spec.team }}"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: namespace
