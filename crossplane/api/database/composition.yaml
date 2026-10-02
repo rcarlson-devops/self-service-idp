@@ -68,7 +68,7 @@ spec:
                 gotemplating.fn.crossplane.io/composition-resource-name: rolebinding
                 gotemplating.fn.crossplane.io/ready: "True"
             subjects:
-              - kind: User
+              - kind: Group
                 name: "{{ .observed.composite.resource.spec.team }}"
             roleRef:
               kind: ClusterRole
