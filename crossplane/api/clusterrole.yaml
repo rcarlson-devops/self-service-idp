@@ -17,4 +17,5 @@ rules:
   verbs: ["create", "update", "delete", "patch", "get", "list", "watch"]
 - apiGroups: ["rbac.authorization.k8s.io"]
   resources: ["clusterroles"]
+  resourceNames: ["edit"]
   verbs: ["bind"]
