@@ -12,3 +12,7 @@ rules:
 - apiGroups: [""]
   resources: ["namespaces"]
   verbs: ["*"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["rolebindings", "rolebindings/status"]
+  verbs: ["create", "updated", "patch", "get", "list", "watch"]
+
