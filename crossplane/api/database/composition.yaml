@@ -44,6 +44,8 @@ spec:
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: postgres-instance
             spec:
-              {{ $sizeDict := dict "small" "1Gi" "medium" "2Gi" "large" "3Gi" }}
-              size: "{{ get $sizeDict .observed.composite.resource.spec.size }}"
               instances: {{ .observed.composite.resource.spec.instances }}
+              storage:
+                {{- $sizeDict := dict "small" "1Gi" "medium" "2Gi" "large" "3Gi" }}
+                size: "{{ get $sizeDict .observed.composite.resource.spec.size }}"
+              
