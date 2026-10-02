@@ -1,13 +1,13 @@
   apiVersion: apiextensions.crossplane.io/v2
   kind: CompositeResourceDefinition
   metadata:
-    name: xpsdatabases.rcarlsondevops.org
+    name: postgresdatabases.rcarlsondevops.org
   spec:
     scope: Cluster
     group: rcarlsondevops.org
     names:
-      kind: XPsDatabase
-      plural: xpsdatabases
+      kind: PostgresDatabase
+      plural: postgresdatabases
     versions:
       - name: v1alpha1
         served: true
