@@ -14,7 +14,7 @@ Built in phases; this table is the honest picture of what exists today.
 |---|---|---|
 | 1. Foundation | k3d cluster, Argo CD (app-of-apps), containerized Go service, CI to GHCR, GitOps deploy | **Done** |
 | 2. Self-service infrastructure | Crossplane + CloudNativePG: one `PostgresDatabase` request creates a namespace, team RBAC, and a Postgres cluster | **Done** |
-| 3. Developer portal | Backstage software template: repo + CI + infra from one form | Next |
+| 3. Self-service request | GitHub Actions form: one typed request is validated and committed to `tenants/`; Argo CD and Crossplane do the rest | Next |
 | 4. Guardrails | Kyverno policies, External Secrets + Vault | Planned |
 | 5. Observability | Prometheus + Grafana by default for every service | Planned |
 | 6. Docs and metrics | Architecture diagram, golden path, before/after numbers | Ongoing |
@@ -39,11 +39,11 @@ At most organizations, getting a new service into production means filing a tick
 
 ## What This Platform Does
 
-**Target experience (the portal in step 1 arrives in Phase 3; steps 5 and 6 in Phases 4 and 5).** A developer fills out one form in a self-service portal. That single action:
+**Target experience (the form in step 1 arrives in Phase 3; steps 5 and 6 in Phases 4 and 5).** A developer fills out one form (a GitHub Actions workflow with typed inputs). That single action:
 
-1. Creates a new repository from a standardized template
-2. Sets up a CI pipeline automatically
-3. Requests and provisions the backing infrastructure (namespace, database, RBAC)
+1. Validates the request before it lands
+2. Commits the request to `tenants/`, with no ticket and no human approval step
+3. Provisions the backing infrastructure through Crossplane (namespace, database, RBAC)
 4. Deploys the service via GitOps — no manual `kubectl apply`, ever
 5. Applies security and compliance guardrails automatically (no root containers, required labels, no plaintext secrets)
 6. Surfaces observability (metrics, dashboards) with zero extra setup
@@ -65,7 +65,7 @@ Crossplane turns that into a Namespace (`<name>-db`), a CloudNativePG `Cluster` 
 
 ## Architecture
 
-What is built so far. Backstage, Kyverno, External Secrets, and Prometheus are not drawn because they do not exist yet. Today a database request is applied with `kubectl`; in Phase 3 the portal commits it to Git instead.
+What is built so far. The self-service form, Kyverno, External Secrets, and Prometheus are not drawn because they do not exist yet. Today a database request is applied with `kubectl`; in Phase 3 the form commits it to Git instead.
 
 ```mermaid
 flowchart LR
@@ -91,7 +91,7 @@ flowchart LR
 | Crossplane functions | function-go-templating v0.13.0, function-auto-ready v0.7.0, function-sequencer v0.6.0 | In use | Template the resources, report readiness, order creation |
 | Database | CloudNativePG (chart 0.29.1) | In use | Kubernetes-native Postgres operator; no cloud provider needed locally |
 | CI | GitHub Actions, images in GHCR | In use | Standard, free, widely recognized |
-| Developer portal / catalog | Backstage | Phase 3 | Single entry point for the golden path |
+| Self-service front door | GitHub Actions (`workflow_dispatch` form) | Phase 3 | One typed form as the single entry point; no extra tooling to host |
 | Policy as code | Kyverno | Phase 4 | Guardrails enforced automatically, not reviewed manually |
 | Secrets | External Secrets Operator + Vault (dev) or SOPS | Phase 4 | No plaintext secrets ever committed to Git |
 | Observability | Prometheus + Grafana | Phase 5 | Metrics available by default for anything deployed through the platform |
@@ -110,19 +110,19 @@ flowchart LR
 
 _Target flow, filled in for real once Phase 3 is done. Until then, the working piece is the database request above._
 
-1. Go to the Backstage portal and select **Create → New Service**
+1. Open the repo's **Actions** tab, select the self-service workflow, and click **Run workflow**
 2. Fill in service name, team/owner, and whether it needs a database
-3. Submit — the platform handles the rest
-4. Your new repo appears with CI already configured
-5. Watch the deployment sync automatically in Argo CD
+3. Submit — the workflow validates the request and commits it to `tenants/`
+4. Argo CD syncs the new commit and Crossplane provisions the infrastructure
+5. Watch the rollout in Argo CD
 6. Your service is live, with metrics already visible in Grafana
 
 ## What's Next at Scale
 
 - **Multi-tenancy:** namespace-per-team isolation with resource quotas, rather than a shared flat cluster
-- **Cost tracking:** tag-based cost attribution surfaced back in Backstage so teams see what their infra costs
-- **More templates:** expand beyond one service type to cover common patterns (worker/queue consumer, scheduled job, static site)
-- **Self-service beyond day 1:** scaling, rollback, and decommissioning through the same portal, not just creation
+- **Cost tracking:** tag-based cost attribution surfaced back to teams (for example in Grafana) so they see what their infra costs
+- **More service types:** expand beyond one service type to cover common patterns (worker/queue consumer, scheduled job, static site)
+- **Self-service beyond day 1:** scaling, rollback, and decommissioning through the same self-service workflow, not just creation
 - **Database hardening:** backups, a resize path, conditional synchronous replication, read-only and admin role options, and CPU/memory in `size`
 - **Narrower Crossplane permissions:** its Namespace rule currently allows all verbs, which is fine locally but too broad for a shared cluster
 
@@ -149,7 +149,7 @@ _Target flow, filled in for real once Phase 3 is done. Until then, the working p
 └── .github/workflows/       CI
 ```
 
-Folders for later phases (`backstage/`, `policies/`, `secrets/`, `observability/`, `tenants/`) are added as those phases start. Ordering between components comes from sync-wave annotations on the Applications, not from folder name prefixes.
+Folders for later phases (`policies/`, `secrets/`, `observability/`, `tenants/`) are added as those phases start. Ordering between components comes from sync-wave annotations on the Applications, not from folder name prefixes.
 
 ## Running This Locally
 
@@ -220,7 +220,7 @@ k3d cluster delete dev-cluster
 ## Known Limitations
 
 - The Go app has no `/metrics` endpoint yet, which Phase 5 needs.
-- The Helm chart's resource names ignore the release name, so two services from one chart in one namespace would collide. This is fixed before the Phase 3 scaffolder generates services.
+- The Helm chart's resource names ignore the release name, so two services from one chart in one namespace would collide. This is fixed before the Phase 3 self-service workflow generates services.
 - The CI bot commits directly to `main`, which would not work with branch protection.
 - Database volumes cannot be resized (the local storage class disallows expansion), and deleting a request deletes its data.
 - No guardrails or secrets management yet; those are Phase 4. Database credentials live in the generated Kubernetes Secret.

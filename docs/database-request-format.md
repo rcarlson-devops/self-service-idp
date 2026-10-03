@@ -17,7 +17,7 @@ spec:
   size: small
 ```
 
-Submit it with `kubectl apply -f <file>`. (Submitting through Git and the Backstage portal comes in later phases; the manifest stays the same.)
+Submit it with `kubectl apply -f <file>`. (Submitting through Git and a self-service form comes in later phases; the manifest stays the same.)
 
 ## Fields
 
@@ -101,4 +101,4 @@ Deleting the request removes the namespace and everything in it, **including the
 - **Secrets management:** credentials live in the generated Secret; integration with an external secrets store arrives in Phase 4.
 - **Observability:** metrics and dashboards arrive in Phase 5.
 - **Backups and resizing:** not configured or supported.
-- **Self-service through the portal:** requesting a database from a form (Backstage) arrives in Phase 3.
+- **Self-service through a form:** requesting a database from a form (a GitHub Actions workflow) arrives in Phase 3.

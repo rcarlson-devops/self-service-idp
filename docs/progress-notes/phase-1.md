@@ -55,4 +55,4 @@ The end-to-end figure is a single sample. Argo's default poll interval means it 
 - Argo pickup is poll-based; a webhook would cut and stabilize the delay but needs a public endpoint (not available on k3d)
 - `ghcr-cred` pull secret is created from env vars by `bootstrap.sh`; replaced by External Secrets in Phase 4
 - The Go app has no `/metrics` endpoint yet (needed for Phase 5)
-- Chart `fullname` ignores the release name; must be fixed before the Phase 3 scaffolder generates multiple services
+- Chart `fullname` ignores the release name; must be fixed before the Phase 3 self-service workflow generates multiple services
