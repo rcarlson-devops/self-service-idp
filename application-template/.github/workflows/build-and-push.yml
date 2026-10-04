@@ -70,6 +70,7 @@ jobs:
       - name: Update values-dev.yaml
         run: |
           yq -i '.image.tag = "sha-${{ steps.vars.outputs.sha_short }}"' ../environments/dev/values-dev.yaml
+          yq -i '.image.repository = "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"' ../environments/dev/values-dev.yaml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add ../environments/dev/values-dev.yaml
