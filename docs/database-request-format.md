@@ -62,7 +62,7 @@ For the example request above, once `READY` shows `True`:
 | What | Name | Where |
 |---|---|---|
 | Namespace | `example-postgresdatabase-db` | Cluster-wide |
-| Team access | RoleBinding `example-postgresdatabase-rolebinding-db` | In that namespace. Grants the group named by `spec.team` the `edit` role there. |
+| Team access | RoleBinding `team-edit` | In that namespace. Grants the group named by `spec.team` the `edit` role there. |
 | Postgres cluster | `postgres-db` | In that namespace. The name is the same in every namespace. |
 | Credentials | Secret `postgres-db-app` | In that namespace |
 | Primary (reads and writes) | Service `postgres-db-rw` | In that namespace |

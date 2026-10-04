@@ -14,7 +14,8 @@ Built in phases; this table is the honest picture of what exists today.
 |---|---|---|
 | 1. Foundation | k3d cluster, Argo CD (app-of-apps), containerized Go service, CI to GHCR, GitOps deploy | **Done** |
 | 2. Self-service infrastructure | Crossplane + CloudNativePG: one `PostgresDatabase` request creates a namespace, team RBAC, and a Postgres cluster | **Done** |
-| 3. Self-service request | GitHub Actions form: one typed request is validated and committed to `tenants/`; Argo CD and Crossplane do the rest | Next |
+| 2.5. Terraform bootstrap | Spin up k3d cluster and ArgoCD using terraform | Next |
+| 3. Self-service request | GitHub Actions form: one typed request is validated and committed to `tenants/`; Argo CD and Crossplane do the rest | Planned |
 | 4. Guardrails | Kyverno policies, External Secrets + Vault | Planned |
 | 5. Observability | Prometheus + Grafana by default for every service | Planned |
 | 6. Docs and metrics | Architecture diagram, golden path, before/after numbers | Ongoing |

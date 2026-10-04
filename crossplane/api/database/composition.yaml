@@ -61,7 +61,7 @@ spec:
             kind: RoleBinding
             metadata:
               namespace: "{{ .observed.composite.resource.metadata.name }}-db"
-              name: "{{ .observed.composite.resource.metadata.name }}-rolebinding-db"
+              name: team-edit
               labels:
                 team: "{{ .observed.composite.resource.spec.team }}"
               annotations:
