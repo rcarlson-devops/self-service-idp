@@ -2,7 +2,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: ${{ repo_name }}-app
+  name:
   namespace: argocd
 spec:
   project: default
@@ -13,12 +13,12 @@ spec:
       helm:
         valueFiles:
           - $values/environments/dev/values-dev.yaml
-    - repoURL: ${{ repo_url }}
+    - repoURL:
       targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
-    namespace: ${{ repo_name }}
+    namespace:
   syncPolicy:
     automated:
       prune: true
