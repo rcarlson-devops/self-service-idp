@@ -1,0 +1,35 @@
+name: Deploy go-app-template and database
+
+on:
+    workflow_dispatch:
+        inputs:
+            team:
+                description: 'The team name which will be used to name all resources deployed'
+                required: true
+                type: string
+            instances:
+                description: 'The number of database instances to deploy'
+                required: true
+                type: choice
+                options:
+                    - '1'
+                    - '2'
+                    - '3'
+            size:
+                description: 'The size of the database to deploy'
+                required: true
+                type: choice
+                options:
+                    - small
+                    - medium
+                    - large
+
+jobs:
+    temporary_job:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Print values
+              run: |
+                echo "Team: ${{ inputs.team }}"
+                echo "Instances: ${{ inputs.instances }}"
+                echo "Size: ${{ inputs.size }}"
