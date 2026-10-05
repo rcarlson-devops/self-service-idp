@@ -11,11 +11,6 @@ Thumbs.db
 .vscode/
 *.swp
 
-# Local Go build output (anchored so charts/app/ is NOT ignored)
-/app/app
-/app/*.test
-/app/*.out
-
 # Local config and credentials: never commit these
 .env
 .env.*
