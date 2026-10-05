@@ -1,0 +1,27 @@
+# Deploys the app chart into each repo's environment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: test-repo
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/rcarlson-devops/self-service-idp.git
+      targetRevision: main
+      path: charts/app
+      helm:
+        valueFiles:
+          - $values/environments/dev/values-dev.yaml
+    - repoURL: https://github.com/rcarlson-devops/test-repo
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: test-repo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
