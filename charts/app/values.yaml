@@ -49,5 +49,5 @@ terminationGracePeriodSeconds: 20
 extraLabels:
   cost-center: platform-eng
 
-imagePullSecrets:
-  - name: ghcr-cred
+# imagePullSecrets:
+#   - name: ghcr-cred
