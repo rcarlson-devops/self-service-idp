@@ -1,10 +1,10 @@
-{{ include "hello-world.fullname" . }} ({{ .Values.environment }}) has been deployed to namespace "{{ .Release.Namespace }}".
+{{ include "app.fullname" . }} ({{ .Values.environment }}) has been deployed to namespace "{{ .Release.Namespace }}".
 
 Check rollout status:
-  kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "hello-world.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "app.fullname" . }}
 
 Port-forward to try it locally:
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "hello-world.fullname" . }} 9090:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "app.fullname" . }} 9090:{{ .Values.service.port }}
   curl localhost:9090/
   curl localhost:9090/version
 
