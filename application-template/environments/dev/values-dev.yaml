@@ -1,8 +1,2 @@
-# helm upgrade --install app ./charts/app \
-#   -f ./environments/dev/values-dev.yaml \
-#   --namespace repo_name --create-namespace
-
 replicaCount: 1
-image:
-  tag: sha-976c105
 environment: dev
