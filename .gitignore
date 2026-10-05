@@ -11,8 +11,8 @@ Thumbs.db
 .vscode/
 *.swp
 
-# Local Go build output (anchored so charts/hello-world/ is NOT ignored)
-/app/hello-world
+# Local Go build output (anchored so charts/app/ is NOT ignored)
+/app/app
 /app/*.test
 /app/*.out
 

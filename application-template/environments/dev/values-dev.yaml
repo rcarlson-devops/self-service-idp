@@ -1,6 +1,6 @@
-# helm upgrade --install hello-world ./charts/hello-world \
+# helm upgrade --install app ./charts/app \
 #   -f ./environments/dev/values-dev.yaml \
-#   --namespace hello-world-dev --create-namespace
+#   --namespace repo_name --create-namespace
 
 replicaCount: 1
 image:

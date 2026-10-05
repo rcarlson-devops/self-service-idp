@@ -71,7 +71,7 @@ What is built so far. The self-service form, Kyverno, External Secrets, and Prom
 flowchart LR
     CI[GitHub Actions] -->|commits image tag| Git[(GitHub repo)]
     Git -->|sync| Argo[Argo CD]
-    Argo --> App[hello-world service]
+    Argo --> App[Go service]
     Argo --> CP[Crossplane, functions, XRD and Composition]
     Argo --> CNPG[CloudNativePG operator]
     Req[PostgresDatabase request] --> CP
@@ -130,16 +130,16 @@ _Target flow, filled in for real once Phase 3 is done. Until then, the working p
 
 ```
 .
-├── app/                     Go hello-world service (see app/README.md)
+├── app/                     Go app service (see app/README.md)
 ├── argocd/
 │   ├── root.yaml            App-of-apps root; the only Argo resource applied by hand
 │   └── apps/                Argo CD Application manifests only
 │       ├── 00-operators/        CloudNativePG, Crossplane
 │       ├── 10-crossplane-runtime/   Crossplane functions
 │       ├── 20-platform-api/     PostgresDatabase API
-│       └── 30-workloads/        hello-world-dev
+│       └── 30-workloads/
 ├── bootstrap/               bootstrap.sh, k3d config, pinned Argo CD install
-├── charts/hello-world/      Helm chart for the sample app
+├── charts/app/      Helm chart for the sample app
 ├── crossplane/
 │   ├── functions/           The three Crossplane Function packages
 │   ├── api/                 Crossplane RBAC; database/ holds the XRD and Composition
@@ -187,9 +187,6 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
 
 ```bash
 kubectl -n argocd get applications     # all should end up Synced / Healthy
-kubectl -n hello-world-dev get pods
-kubectl -n hello-world-dev port-forward svc/hello-world 9090:80
-curl localhost:9090/version
 ```
 
 **5. Request a database**
