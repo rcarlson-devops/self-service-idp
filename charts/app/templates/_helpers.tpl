@@ -1,23 +1,23 @@
 {{/*
 Base name for resources, honoring an override if one is set.
 */}}
-{{- define "hello-world.name" -}}
+{{- define "app.name" -}}
 {{- .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 Fully qualified app name.
 */}}
-{{- define "hello-world.fullname" -}}
-{{- .Chart.Name | trunc 63 | trimSuffix "-" -}}
+{{- define "app.fullname" -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 Standard selector labels - used by Deployment.spec.selector, so keep these
 fields stable; adding to this template later would break existing rollouts.
 */}}
-{{- define "hello-world.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "hello-world.name" . }}
+{{- define "app.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "app.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
@@ -25,8 +25,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Full label set applied to metadata.labels, including chart/version info,
 the current environment, and any extraLabels from values (e.g. cost-center).
 */}}
-{{- define "hello-world.labels" -}}
-{{ include "hello-world.selectorLabels" . }}
+{{- define "app.labels" -}}
+{{ include "app.selectorLabels" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
