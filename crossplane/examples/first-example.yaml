@@ -1,8 +1,0 @@
-apiVersion: rcarlsondevops.org/v1alpha1
-kind: PostgresDatabase
-metadata:
-  name: example-postgresdatabase
-spec:
-  team: example-team
-  instances: 2
-  size: small
