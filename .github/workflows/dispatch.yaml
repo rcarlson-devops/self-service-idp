@@ -27,9 +27,15 @@ on:
 jobs:
     temporary_job:
         runs-on: ubuntu-latest
+        env:
+            TEAM: ${{ inputs.team }}
+            INSTANCES: ${{ inputs.instances }}
+            SIZE: ${{ inputs.size }}
         steps:
+            - name: Checkout repository
+              uses: actions/checkout@v7
             - name: Print values
               run: |
-                echo "Team: ${{ inputs.team }}"
-                echo "Instances: ${{ inputs.instances }}"
-                echo "Size: ${{ inputs.size }}"
+                echo "Team: $TEAM"
+                echo "Instances: $INSTANCES"
+                echo "Size: $SIZE"
