@@ -1,65 +1,86 @@
 name: Deploy go-app-template and database
 
 on:
-    workflow_dispatch:
-        inputs:
-            team:
-                description: 'The team name which will be used to name all resources deployed'
-                required: true
-                type: string
-            instances:
-                description: 'The number of database instances to deploy'
-                required: true
-                type: choice
-                options:
-                    - '1'
-                    - '2'
-                    - '3'
-            size:
-                description: 'The size of the database to deploy'
-                required: true
-                type: choice
-                options:
-                    - small
-                    - medium
-                    - large
+  workflow_dispatch:
+    inputs:
+      team:
+        description: 'The team name which will be used to name all resources deployed'
+        required: true
+        type: string
+      instances:
+        description: 'The number of database instances to deploy'
+        required: true
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+      size:
+        description: 'The size of the database to deploy'
+        required: true
+        type: choice
+        options:
+          - small
+          - medium
+          - large
 
 jobs:
-    deploy_new_repo:
-        runs-on: ubuntu-latest
-        steps:
-            - name: deploy
-              run: |
-                echo "Deploying go-app-template and database for team: ${{ inputs.team }}"
-                echo "Number of instances: ${{ inputs.instances }}"
-                echo "Size: ${{ inputs.size }}"
-    populate_tenants:
-        runs-on: ubuntu-latest
-        env:
-            TEAM: ${{ inputs.team }}
-            INSTANCES: ${{ inputs.instances }}
-            SIZE: ${{ inputs.size }}
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v7
-            - name: Copy application.yaml.tmpl to tenants
-              run: |
-                mkdir "./argocd/tenants/${TEAM}" 
-                cp ./self-service/templates/application.yaml.tmpl "./argocd/tenants/${TEAM}/application.yaml"
-            - name: Copy database.yaml.tmpl to tenants
-              run: cp ./self-service/templates/database.yaml.tmpl "./argocd/tenants/${TEAM}/database.yaml"
-            - name: Replace placeholders in application.yaml
-              run: |
-                yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
-                yq -i '(.spec.sources[1].repoURL) = "https://github.com/rcarlson-devops/" + strenv(TEAM) + ".git"' "./argocd/tenants/${TEAM}/application.yaml"
-                yq -i '(.spec.destination.namespace) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
-            - name: Replace placeholders in database.yaml
-              run: |
-                yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
-                yq -i '(.spec.team) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
-                yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${TEAM}/database.yaml"
-                yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${TEAM}/database.yaml"
-            - name: Commit and push changes
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate inputs
+        run: |
+          if [ "${{ inputs.team }}" -gt 60 ]; then
+            echo "Error: Team name must be 60 characters or less."
+            exit 1
+          fi
+          if [[ ! "${{ inputs.team }}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,58}[a-zA-Z0-9])?$ ]]; then
+            echo "Error: Team name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen."
+            exit 1
+          fi
+          if [[ ! "${{ inputs.instances }}" =~ ^[1-3]$ ]]; then
+            echo "Error: Instances must be 1, 2, or 3."
+            exit 1
+          fi
+          if [[ ! "${{ inputs.size }}" =~ ^(small|medium|large)$ ]]; then
+            echo "Error: Size must be small, medium, or large."
+            exit 1
+          fi
+  deploy_new_repo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: deploy
+        run: |
+          echo "Deploying go-app-template and database for team: ${{ inputs.team }}"
+          echo "Number of instances: ${{ inputs.instances }}"
+          echo "Size: ${{ inputs.size }}"
+  populate_tenants:
+      runs-on: ubuntu-latest
+      env:
+        TEAM: ${{ inputs.team }}
+        INSTANCES: ${{ inputs.instances }}
+        SIZE: ${{ inputs.size }}
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v7
+        - name: Copy application.yaml.tmpl to tenants
+          run: |
+            mkdir "./argocd/tenants/${TEAM}" 
+            cp ./self-service/templates/application.yaml.tmpl "./argocd/tenants/${TEAM}/application.yaml"
+        - name: Copy database.yaml.tmpl to tenants
+          run: cp ./self-service/templates/database.yaml.tmpl "./argocd/tenants/${TEAM}/database.yaml"
+        - name: Replace placeholders in application.yaml
+          run: |
+            yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
+            yq -i '(.spec.sources[1].repoURL) = "https://github.com/rcarlson-devops/" + strenv(TEAM) + ".git"' "./argocd/tenants/${TEAM}/application.yaml"
+            yq -i '(.spec.destination.namespace) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
+        - name: Replace placeholders in database.yaml
+          run: |
+            yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
+            yq -i '(.spec.team) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
+            yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${TEAM}/database.yaml"
+            yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${TEAM}/database.yaml"
+        - name: Commit and push changes
               run: |
                 git config --global user.name "github-actions[bot]"
                 git config --global user.email "github-actions[bot]@users.noreply.github.com"
