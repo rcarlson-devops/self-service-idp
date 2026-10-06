@@ -59,3 +59,10 @@ jobs:
                 yq -i '(.spec.team) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
                 yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${TEAM}/database.yaml"
                 yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${TEAM}/database.yaml"
+            - name: Commit and push changes
+              run: |
+                git config --global user.name "github-actions[bot]"
+                git config --global user.email "github-actions[bot]@users.noreply.github.com"
+                git add "./argocd/tenants/${TEAM}/application.yaml" "./argocd/tenants/${TEAM}/database.yaml"
+                git commit -m "Add application and database manifests for team ${TEAM}"
+                git push origin HEAD:main
