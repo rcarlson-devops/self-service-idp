@@ -32,7 +32,7 @@ jobs:
             echo "Error: Team name must be 60 characters or less."
             exit 1
           fi
-          if [[ ! "${{ inputs.team }}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,58}[a-zA-Z0-9])?$ ]]; then
+          if [[ ! "${{ inputs.team }}" =~ ^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$ ]]; then
             echo "Error: Team name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen."
             exit 1
           fi
@@ -59,7 +59,7 @@ jobs:
             -H "X-Github-Api-Version: 2022-11-28" \
             "/repos/rcarlson-devops/go-app-template/generate" \
             -f name="${TEAM}" \
-            -f private=false
+            -F private=false
   populate_tenants:
     runs-on: ubuntu-latest
     needs: deploy_new_repo
