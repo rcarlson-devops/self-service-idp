@@ -25,18 +25,22 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      TEAM: ${{ inputs.team }}
+      INSTANCES: ${{ inputs.instances }}
+      SIZE: ${{ inputs.size }}
     steps:
       - name: Validate inputs
         run: |
-          if [[ ! "${{ inputs.team }}" =~ ^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$ ]]; then
+          if [[ ! "$TEAM" =~ ^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$ ]]; then
             echo "Error: Team name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen."
             exit 1
           fi
-          if [[ ! "${{ inputs.instances }}" =~ ^[1-3]$ ]]; then
+          if [[ ! "$INSTANCES" =~ ^[1-3]$ ]]; then
             echo "Error: Instances must be 1, 2, or 3."
             exit 1
           fi
-          if [[ ! "${{ inputs.size }}" =~ ^(small|medium|large)$ ]]; then
+          if [[ ! "$SIZE" =~ ^(small|medium|large)$ ]]; then
             echo "Error: Size must be small, medium, or large."
             exit 1
           fi
@@ -64,12 +68,34 @@ jobs:
       INSTANCES: ${{ inputs.instances }}
       SIZE: ${{ inputs.size }}
     steps:
-      - name: Wait for new repo to push docker image
-        uses: replayio/action-wait-for-ghcr-image@latest
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          github-username: ${{ secrets.GITHUB_ACTOR }}
-          image-name: "ghcr.io/rcarlson-devops/${{ inputs.team }}:latest" 
+      - name: Poll new repo for commit
+        env:
+          GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
+          TARGET_REPO: "rcarlson-devops/${{ inputs.team }}"
+          TARGET_BRANCH: "main"
+          FILE_PATH: "environments/dev/values-dev.yaml"
+        timeout-minutes: 5
+        run: |
+          INITIAL_FILE_SHA=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-Github-Api-Version: 2026-03-10" \
+            "/repos/${TARGET_REPO}/commits?path=${FILE_PATH}&sha=${TARGET_BRANCH}" \
+            | jq -r '.[0].sha')
+          echo "Initial file SHA: $INITIAL_FILE_SHA"
+          while true; do
+            LATEST_FILE_SHA=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-Github-Api-Version: 2026-03-10" \
+              "/repos/${TARGET_REPO}/commits?path=${FILE_PATH}&sha=${TARGET_BRANCH}" \
+              | jq -r '.[0].sha')
+            echo "Latest file SHA: $LATEST_FILE_SHA"
+            if [ "$LATEST_FILE_SHA" != "$INITIAL_FILE_SHA" ]; then
+              echo "New commit detected. Proceeding with the workflow."
+              break
+            fi
+            echo "No new commit detected. Waiting for 20 seconds before checking again..."
+            sleep 20
+          done
       - name: Checkout repository
         uses: actions/checkout@v7
       - name: Copy application.yaml.tmpl to tenants
