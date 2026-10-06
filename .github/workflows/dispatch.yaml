@@ -25,7 +25,15 @@ on:
                     - large
 
 jobs:
-    temporary_job:
+    deploy_new_repo:
+        runs-on: ubuntu-latest
+        steps:
+            - name: deploy
+              run: |
+                echo "Deploying go-app-template and database for team: ${{ inputs.team }}"
+                echo "Number of instances: ${{ inputs.instances }}"
+                echo "Size: ${{ inputs.size }}"
+    populate_tenants:
         runs-on: ubuntu-latest
         env:
             TEAM: ${{ inputs.team }}
@@ -34,8 +42,20 @@ jobs:
         steps:
             - name: Checkout repository
               uses: actions/checkout@v7
-            - name: Print values
+            - name: Copy application.yaml.tmpl to tenants
               run: |
-                echo "Team: $TEAM"
-                echo "Instances: $INSTANCES"
-                echo "Size: $SIZE"
+                mkdir "./argocd/tenants/${TEAM}" 
+                cp ./self-service/templates/application.yaml.tmpl "./argocd/tenants/${TEAM}/application.yaml"
+            - name: Copy database.yaml.tmpl to tenants
+              run: cp ./self-service/templates/database.yaml.tmpl "./argocd/tenants/${TEAM}/database.yaml"
+            - name: Replace placeholders in application.yaml
+              run: |
+                yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
+                yq -i '(.spec.sources[1].repoURL) = "https://github.com/rcarlson-devops/" + strenv(TEAM) + ".git"' "./argocd/tenants/${TEAM}/application.yaml"
+                yq -i '(.spec.destination.namespace) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
+            - name: Replace placeholders in database.yaml
+              run: |
+                yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
+                yq -i '(.spec.team) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
+                yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${TEAM}/database.yaml"
+                yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${TEAM}/database.yaml"
