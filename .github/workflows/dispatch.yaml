@@ -83,7 +83,7 @@ jobs:
       - name: Replace placeholders in application.yaml
         run: |
           yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
-          yq -i '(.spec.sources[1].repoURL) = "https://github.com/rcarlson-devops/" + strenv(TEAM) + ".git"' "./argocd/tenants/${TEAM}/application.yaml"
+          yq -i '(.spec.sources[] | select(.ref == "values")).repoURL = "https://github.com/rcarlson-devops/" + strenv(TEAM) + ".git"' "./argocd/tenants/${TEAM}/application.yaml"
           yq -i '(.spec.destination.namespace) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
       - name: Replace placeholders in database.yaml
         run: |
