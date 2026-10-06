@@ -28,9 +28,9 @@ The workflow needs a token that can create repositories from the template. The b
 1. Open **GitHub > Settings > Developer settings > Personal access tokens > Fine-grained tokens** and choose **Generate new token**.
 2. Set:
    - **Resource owner:** your account.
-   - **Expiration:** the shortest that suits you. TODO: record the expiry you chose.
-   - **Repository access:** TODO: record the scope you chose (for example, all repositories or selected repositories).
-   - **Permissions:** TODO: record the exact permissions you granted. GitHub's documentation for the "create a repository using a template" endpoint lists the permission combinations it accepts; recheck it when you create the token.
+   - **Expiration:** the shortest that suits you. For now, I have chosen no expiry date.
+   - **Repository access:** I gave it access to all the repositories I own
+   - **Permissions:** The token has no user permissions and has repository permissions of Read access to code and metadata. Read and write access to administration.
 3. Copy the token **once**, straight into your password manager. Never paste it into a file, a chat, a commit or a shell startup file.
 
 Why this is a trade-off: a token that can create repositories is broad. It is tied to your account, it expires, and it is stored only as an Actions secret. A GitHub App is the at-scale replacement (see the main README's "what's next" section).
