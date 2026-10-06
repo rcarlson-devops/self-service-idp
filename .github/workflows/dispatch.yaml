@@ -46,12 +46,19 @@ jobs:
           fi
   deploy_new_repo:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
+      TEAM: ${{ inputs.team }}
     steps:
       - name: deploy
         run: |
-          echo "Deploying go-app-template and database for team: ${{ inputs.team }}"
-          echo "Number of instances: ${{ inputs.instances }}"
-          echo "Size: ${{ inputs.size }}"
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-Github-Api-Version: 2022-11-28" \
+            "/repos/rcarlson-devops/go-app-template/generate" \
+            -f name="${TEAM}" \
+            -f private=false
   populate_tenants:
     runs-on: ubuntu-latest
     env:
@@ -59,6 +66,12 @@ jobs:
       INSTANCES: ${{ inputs.instances }}
       SIZE: ${{ inputs.size }}
     steps:
+      - name: Wait for new repo to push docker image
+        uses: replayio/action-wait-for-ghcr-image@latest
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-username: ${{ secrets.GITHUB_ACTOR }}
+          image-name: "ghcr.io/rcarlson-devops/${{ inputs.team }}:latest" 
       - name: Checkout repository
         uses: actions/checkout@v7
       - name: Copy application.yaml.tmpl to tenants
