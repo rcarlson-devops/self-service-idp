@@ -1,5 +1,4 @@
 name: Deploy go-app-template and database
-
 on:
   workflow_dispatch:
     inputs:
@@ -23,7 +22,6 @@ on:
           - small
           - medium
           - large
-
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -55,35 +53,33 @@ jobs:
           echo "Number of instances: ${{ inputs.instances }}"
           echo "Size: ${{ inputs.size }}"
   populate_tenants:
-      runs-on: ubuntu-latest
-      env:
-        TEAM: ${{ inputs.team }}
-        INSTANCES: ${{ inputs.instances }}
-        SIZE: ${{ inputs.size }}
-      steps:
-        - name: Checkout repository
-          uses: actions/checkout@v7
-        - name: Copy application.yaml.tmpl to tenants
-          run: |
-            mkdir "./argocd/tenants/${TEAM}" 
-            cp ./self-service/templates/application.yaml.tmpl "./argocd/tenants/${TEAM}/application.yaml"
-        - name: Copy database.yaml.tmpl to tenants
-          run: cp ./self-service/templates/database.yaml.tmpl "./argocd/tenants/${TEAM}/database.yaml"
-        - name: Replace placeholders in application.yaml
-          run: |
-            yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
-            yq -i '(.spec.sources[1].repoURL) = "https://github.com/rcarlson-devops/" + strenv(TEAM) + ".git"' "./argocd/tenants/${TEAM}/application.yaml"
-            yq -i '(.spec.destination.namespace) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
-        - name: Replace placeholders in database.yaml
-          run: |
-            yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
-            yq -i '(.spec.team) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
-            yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${TEAM}/database.yaml"
-            yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${TEAM}/database.yaml"
-        - name: Commit and push changes
-              run: |
-                git config --global user.name "github-actions[bot]"
-                git config --global user.email "github-actions[bot]@users.noreply.github.com"
-                git add "./argocd/tenants/${TEAM}/application.yaml" "./argocd/tenants/${TEAM}/database.yaml"
-                git commit -m "Add application and database manifests for team ${TEAM}"
-                git push origin HEAD:main
+    runs-on: ubuntu-latest
+    env:
+      TEAM: ${{ inputs.team }}
+      INSTANCES: ${{ inputs.instances }}
+      SIZE: ${{ inputs.size }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Copy application.yaml.tmpl to tenants
+        run: "mkdir \"./argocd/tenants/${TEAM}\" \ncp ./self-service/templates/application.yaml.tmpl \"./argocd/tenants/${TEAM}/application.yaml\"\n"
+      - name: Copy database.yaml.tmpl to tenants
+        run: cp ./self-service/templates/database.yaml.tmpl "./argocd/tenants/${TEAM}/database.yaml"
+      - name: Replace placeholders in application.yaml
+        run: |
+          yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
+          yq -i '(.spec.sources[1].repoURL) = "https://github.com/rcarlson-devops/" + strenv(TEAM) + ".git"' "./argocd/tenants/${TEAM}/application.yaml"
+          yq -i '(.spec.destination.namespace) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
+      - name: Replace placeholders in database.yaml
+        run: |
+          yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
+          yq -i '(.spec.team) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
+          yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${TEAM}/database.yaml"
+          yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${TEAM}/database.yaml"
+      - name: Commit and push changes
+        run: |-
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add "./argocd/tenants/${TEAM}/application.yaml" "./argocd/tenants/${TEAM}/database.yaml"
+          git commit -m "Add application and database manifests for team ${TEAM}"
+          git push origin HEAD:main
