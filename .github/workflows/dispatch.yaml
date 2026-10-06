@@ -91,6 +91,16 @@ jobs:
           yq -i '(.spec.team) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
           yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${TEAM}/database.yaml"
           yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${TEAM}/database.yaml"
+      - name: Check for failed yq
+        run: |
+          for f in application database; do
+            BLANKS=$(yq '.. | select(tag == "!!null") | path | join(".")' "./argocd/tenants/${TEAM}/${f}.yaml")
+            if [ -n "$BLANKS" ]; then
+              echo "Unfilled fields in ${f}.yaml:"
+              echo "$BLANKS"
+              exit 1
+            fi
+          done          
       - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
