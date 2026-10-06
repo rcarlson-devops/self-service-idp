@@ -56,7 +56,7 @@ jobs:
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
-            -H "X-Github-Api-Version: 2022-11-28" \
+            -H "X-Github-Api-Version: 2026-03-10" \
             "/repos/rcarlson-devops/go-app-template/generate" \
             -f name="${TEAM}" \
             -F private=false
