@@ -4,6 +4,8 @@
 
 **Exit criterion:** a developer goes from "I need a new service with a database" to a running, deployed service through one form submission. Met.
 
+**Closure (2026-10-07):** the three test tenants were deleted, the cluster was rebuilt and measured, and Argo's polling interval was checked and left alone. Failure cleanup was postponed, and regenerating hello-world as the first tenant was dropped (see the end of this note).
+
 All times below are UTC and come from timestamps recorded by GitHub and the cluster, not from a stopwatch.
 
 ## What was built
@@ -20,10 +22,10 @@ All times below are UTC and come from timestamps recorded by GitHub and the clus
 ## How a request flows
 
 1. Someone submits the form in the monorepo.
-2. **validate** checks the name against `^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$`, checks `instances` and `size`, and rejects reserved names (system namespaces and the platform's own Application names).
+2. **validate** checks the name against `^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$`, checks `instances` and `size`, and rejects reserved names (system namespaces, the platform's own Application names, and any name ending in `-db`, which would collide with another service's database namespace). It also checks that no repo with that name and no `argocd/tenants/<service>/` folder exists yet, so a name collision is caught before anything is created.
 3. **deploy_new_repo** creates a public repo from `go-app-template` with the REST generate endpoint (`gh api`), using the PAT.
 4. The new repo's CI starts by itself, builds and pushes `sha-<short>`, and commits the tag and repository into its own `environments/dev/values-dev.yaml`.
-5. **populate_tenants** polls the new repo's values file until `image.tag` has a value, then fills both blueprints with `yq`, fails if any field is still blank, and commits `argocd/tenants/<service>/` to `main`.
+5. **populate_tenants** (in a `concurrency` group, so two runs do not push at the same time) polls the new repo's values file until `image.tag` has a value, then fills both blueprints with `yq`, fails if any field is still blank, and commits `argocd/tenants/<service>/` to `main` after a `git pull --rebase`.
 6. Argo CD notices the commit (polling), creates the service Application, and the database request is applied in the same pass. Crossplane builds the database; the service deploys from the shared chart plus the service repo's values file.
 
 ## Decisions and why
@@ -45,6 +47,20 @@ All times below are UTC and come from timestamps recorded by GitHub and the clus
 - **The first form draft would have failed in several ways** (found by reading it before running it): jobs with no `needs:` ran in parallel and validation gated nothing; it waited for a `:latest` image that CI never pushes (CI pushes only `sha-<short>` tags); text was compared as a number; inputs were pasted into the script text.
 - **The first run hit a permissions error on the push to the monorepo.** The template repo's own workflow had pushed successfully under the same repo-level token setting. My understanding is that a `permissions:` block inside a workflow overrides the repository default, and the template's workflow declares one while the form did not. The failing log was not saved, so treat that explanation as likely rather than proven.
 - **Reading the timestamps taught me to use stable ones.** An Application's `operationState.startedAt` is overwritten by any later sync, so the child Application's `creationTimestamp` is the reliable zero point for platform time.
+
+## Hardening added after the three measured runs
+
+These changes were made after the three runs that produced the measurements below, so the timings describe the earlier form.
+
+- `permissions: contents: write` on `populate_tenants`.
+- `git pull --rebase` before the push.
+- A reserved-name check, including the `-db` suffix rule.
+- Preflight checks in `validate`: the repo name is free and the tenants folder is absent.
+- A `concurrency` group on the job that writes to `main` (no cancel-in-progress).
+- A `yq --version` step, so the run log records which `yq` the runner has.
+- Every `$GITHUB_STEP_SUMMARY` reference is quoted.
+- The unused `imagePullSecrets` block is removed from the chart's Deployment template and `values.yaml` (images are public).
+- `docs/setup.md` no longer says Argo polls in "about 3 minutes".
 
 ## Measurements
 
@@ -70,21 +86,46 @@ Sample 1 was the first service on a cluster built minutes earlier by `bootstrap.
 What the numbers say:
 
 - **Argo CD's polling wait is the largest cost** (189 s of 278 s, 261 s of 401 s). Without it, form submission to a Ready service is about 90 to 140 s.
-- **The wait exceeded 3 minutes in both warm samples.** I have not yet checked Argo's configured interval and any jitter, so I report the measured values only.
+- **The wait exceeded 3 minutes in both warm samples.** Argo CD's default polling interval is 3 minutes, and this cluster does not change it (the `argocd-cm` ConfigMap has no reconciliation setting). I have not explained the excess; Argo's reconcile jitter is a candidate that I did not confirm, so I report the measured values only.
 - **Platform time is stable** at about 7 s, and the database at about 22 to 24 s when warm.
 - **CI duration varied from 62 s to 118 s** with the same code. The cause was not investigated.
 - Three samples is a small number; the detection delay depends on where a commit lands in the poll cycle.
 
+## Cluster rebuild, 2026-10-07 (closure measurement)
+
+The stopping point is defined this time: every Argo CD Application Healthy. Zero is the creation time of the k3d node container (08:14:54Z), which is a few seconds after `bootstrap.sh` started; the script's own start time was not recorded. All times come from `docker inspect` and from `status.health.lastTransitionTime` on each Application.
+
+| Application | Created | Healthy since | Elapsed from zero |
+|---|---|---|---|
+| `self-service-idp-root` | 08:16:34 | 08:16:36 | 1 m 41 s |
+| `crossplane-operator` | 08:16:36 | 08:16:54 | 1 m 59 s |
+| `crossplane-functions` | 08:16:40 | 08:17:02 | 2 m 07 s |
+| `database-api` | 08:16:42 | 08:16:59 | 2 m 04 s |
+| `self-service-idp-tenants` | 08:16:45 | 08:16:45 | 1 m 50 s |
+| `cloudnativepg-operator` | 08:16:36 | 08:20:03 | **5 m 08 s** |
+
+- Every Application except `cloudnativepg-operator` was Healthy after 2 m 07 s. The Argo root Application appeared 1 m 39 s after the node container, so cluster creation and the Argo CD install take most of that time.
+- `cloudnativepg-operator` finished its sync 13 s after it was created (08:16:49) but did not turn Healthy for another 3 m 14 s. The delay is in health, not in syncing. I did not look at the operator's pods or events, so the cause is still unknown. A rebuild on 2026-10-05 was also slow on this Application.
+- The stopwatch readings I took (about 2 m 30 s without the operator, about 5 min with it) are consistent with these timestamps. The earlier "about 2 m 30 s" Phase 2 figure had no defined stopping point and should not be compared with the 5 m 08 s figure.
+
+## Argo CD polling check
+
+`kubectl get cm argocd-cm -n argocd -o yaml | grep -i reconciliation` returned nothing, so the cluster runs the default. The Argo docs give the default as 3 minutes. The interval is configurable, but I decided not to change it. That means the measured detection delays (189 s and 261 s) stand as the baseline, and there is no before-and-after comparison. The docs I read did not mention jitter, so why the delays exceeded 3 minutes is still open.
+
 ## Limitations (to state honestly in the final README)
 
-- Local k3d cluster; Argo CD polls Git, and a GitHub runner cannot trigger a refresh on it. A webhook or a refresh call removes most of the wait at scale.
+- Local k3d cluster; Argo CD polls Git every 3 minutes by default (I left the interval alone), and a GitHub runner cannot trigger a refresh on it. A webhook or a refresh call removes most of the wait at scale.
 - Service repos and images are public.
 - The PAT is broad and tied to a person; a GitHub App is the at-scale answer.
-- One `team` input is used as the service name, repo name, namespace and database access group, so two services from one team would collide.
-- No cleanup if a late step fails after the repo is created; no preflight for existing names; no `concurrency` group; the push has no `git pull --rebase`.
+- One `team` input is used as the service name, repo name, namespace and database access group, so two services from one team would collide, and anyone who can run the form can grant any group `edit` on the namespace.
+- No cleanup if a late step fails after the repo is created (for example, the 5-minute wait for the image tag times out; that step uses the built-in `timeout-minutes`, so the run shows GitHub's generic cancellation message rather than a specific one). Preflight now catches name collisions before anything is created, but a failure after that point leaves the new repo behind, and running the form again with the same name fails until it is removed by hand.
+- Two form runs started at the same moment can both pass preflight. The `concurrency` group serializes the push, not the checks.
 - Deleting a tenant folder prunes the service and its database, including the data. One deletion test left the tenants Application OutOfSync for an unexplained reason.
 - Services are not yet wired to their database credentials (Phase 4).
 
 ## What's next
 
-Finish the form hardening, regenerate hello-world through the form as the first tenant, clean up the three test tenants (while capturing evidence if the OutOfSync appears again), take screenshots, then start Phase 4 (guardrails).
+- **Dropped:** regenerating hello-world through the form as the first tenant. The cluster and the tenants folder are clean, so there is nothing to retire; the first tenant will be whichever service the next phase generates.
+- **Postponed:** failure handling (a final `if: failure()` step that says what exists and how to remove it, deleting nothing), the timing summary in the run summary, CI duration variance, and the slow CloudNativePG start-up. Failure cleanup will be designed together with the decommission workflow.
+- **Screenshots:** one of a completed run (Argo CD showing a service and its database Healthy) is enough.
+- **Next phase:** Phase 4, beginning with the database credentials path.

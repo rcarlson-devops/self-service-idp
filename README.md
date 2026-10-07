@@ -14,7 +14,7 @@ Built in phases; this table is the honest picture of what exists today.
 |---|---|---|
 | 1. Foundation | k3d cluster, Argo CD (app-of-apps), containerized Go service, CI to GHCR, GitOps deploy | **Done** |
 | 2. Self-service infrastructure | Crossplane + CloudNativePG: one `PostgresDatabase` request creates a namespace, team RBAC, and a Postgres cluster | **Done** |
-| 3. Self-service request | GitHub Actions form: one typed request creates the service's own repo from a template and commits its Argo CD Application and database request to `argocd/tenants/`; Argo CD and Crossplane do the rest | **Working end to end** (three runs, each ending in a running service and a Ready database); hardening of the form (input checks, failure handling, a run summary) is in progress |
+| 3. Self-service request | GitHub Actions form: one typed request creates the service's own repo from a template and commits its Argo CD Application and database request to `argocd/tenants/`; Argo CD and Crossplane do the rest | **Working end to end** (three runs, each ending in a running service and a Ready database); hardening of the form (failure handling, a timing summary) is in progress; input checks and preflight are done |
 | 4. Guardrails | The service's database connection (External Secrets + Vault), image scanning and signing, Kyverno policies, default-deny network policies and quotas | Planned |
 | 5. Observability | Container-level metrics and a per-service dashboard by default (Prometheus + Grafana) | Planned |
 | 6. Docs and metrics | Architecture diagram, golden path, before/after numbers | Ongoing |
@@ -23,7 +23,7 @@ Built in phases; this table is the honest picture of what exists today.
 
 | Measurement | Result | Notes |
 |---|---|---|
-| Full rebuild, cluster deleted to everything Synced/Healthy | ~2 m 30 s | One script, zero manual steps. Was 1 m 22 s at the end of Phase 1, before Crossplane and CloudNativePG were added. A later rebuild took about 5 minutes by eye, with the CloudNativePG operator slow to become Healthy. I had not defined the stopping point or scripted the clock, so the two numbers are not comparable, and I have not found the cause |
+| Full rebuild, cluster created to every Application Healthy | **~5 m 08 s** | Read from timestamps on 2026-10-07, from the k3d node container being created to the last Application becoming Healthy. Everything except the CloudNativePG operator was Healthy after 2 m 07 s. The operator was Synced after 13 s but did not become Healthy until 3 m 14 s after that, and I have not found the cause. A rebuild on 2026-10-05 also took about 5 minutes, by eye. Earlier figures were 1 m 22 s at the end of Phase 1 (before Crossplane and CloudNativePG existed) and about 2 m 30 s at the end of Phase 2; neither had a defined stopping point, so they are not comparable |
 | Database request to Ready, warm cluster | **~47 s** | 2 instances, `small`. Earlier runs: 43 s, 46 s, 52 s. A request committed to `argocd/tenants/` took 50 s from creation to Ready (read from timestamps) |
 | Database request to Ready, first request on a fresh cluster | ~1 m 45 s | Image pulls are the likely cause; not confirmed |
 | `git push` to new image running | ~1 m 45 s | One sample. Argo CD polls Git on an interval (see the detection delay below); no webhook on local k3d |
@@ -31,7 +31,7 @@ Built in phases; this table is the honest picture of what exists today.
 | `git push` of a database request to Ready | 6 m 21 s | One sample, timed by clock. Includes Argo CD's polling wait, so it is not a platform time. It is longer than a poll plus the 50 s provisioning would suggest, and I have not yet worked out where the rest went |
 | CI duration | 62-118 s | Generated service repos; the spread has not been investigated |
 | Form submit to tenant commit, warm | 82 s and 133 s | Two samples. Includes validation, repo creation, the new repo's first CI run, and the form waiting for its image tag |
-| Argo CD detection delay (commit to the Application appearing) | 189 s and 261 s | Two samples. Longer than the roughly 3 minutes I assumed; I have not yet checked how the polling interval is configured |
+| Argo CD detection delay (commit to the Application appearing) | 189 s and 261 s | Two samples. Argo CD's default polling interval is 3 minutes and nothing in this cluster changes it, so both samples exceeded it. I have not explained the excess; Argo's reconcile jitter is a candidate I have not confirmed |
 | Service platform time, warm | 7 s | Application creation to the pod being Ready |
 | Database request to Ready, measured on the form runs | 22-24 s warm, 67 s cold | Cold-start cause not confirmed. These runs used a different stopping point from the earlier database rows above, and I have not reconciled the two sets |
 | **Form submit to service Ready** | **278 s and 401 s** | Two samples. The largest part is Argo CD's polling wait, so it is reported separately from platform time |
@@ -151,7 +151,7 @@ _Measured on a local cluster: 278 s and 401 s from submitting the form to a Read
 - **Database hardening:** backups, a resize path, conditional synchronous replication, read-only and admin role options, and CPU/memory in `size`
 - **Narrower Crossplane permissions:** its Namespace rule currently allows all verbs, which is fine locally but too broad for a shared cluster
 - **The foundation layer as Terraform:** `bootstrap.sh` is a script because the cluster is a disposable local k3d cluster and k3d has no officially maintained Terraform support. For real clusters, networking, and identity, Terraform is where I would put that slow-changing layer, run by a human with reviewed plans and remote state, leaving Crossplane for per-request resources and Argo CD for everything in Git
-- **Faster change detection:** Argo CD polls Git on an interval (the measured delay was 189 s and 261 s), and a local k3d cluster is not reachable by a GitHub webhook. A webhook (or a refresh trigger) would remove that wait on a real cluster
+- **Faster change detection:** Argo CD polls Git on an interval (the default interval is 3 minutes; the measured delay was 189 s and 261 s), and a local k3d cluster is not reachable by a GitHub webhook. A webhook (or a refresh trigger) would remove that wait on a real cluster
 - **A GitHub App instead of a personal token:** the self-service form creates repositories with a fine-grained personal access token tied to one person. A GitHub App with narrow, short-lived installation tokens is the scalable replacement
 - **TLS and tracing:** this version has no certificate management (cert-manager) and no distributed tracing
 
@@ -172,8 +172,7 @@ _Measured on a local cluster: 278 s and 401 s from submitting the form to a Read
 ├── charts/app/              Shared Helm chart used by every service
 ├── crossplane/
 │   ├── functions/           The three Crossplane Function packages
-│   ├── api/                 Crossplane RBAC; database/ holds the XRD and Composition
-│   └── examples/            Example request (not synced by Argo CD)
+│   └── api/                 Crossplane RBAC; database/ holds the XRD and Composition
 ├── self-service/
 │   └── templates/           Application and database blueprints the form fills in (not synced by Argo CD)
 └── docs/                    Request format doc, one-time setup, and per-phase progress notes
@@ -200,7 +199,7 @@ cd self-service-idp
 ./bootstrap/bootstrap.sh
 ```
 
-This creates the k3d cluster (`bootstrap/k3d-config.yaml`), installs a pinned version of Argo CD (`bootstrap/argocd/`), and applies `argocd/root.yaml`. From that point Argo CD pulls everything else from Git: the operators, the Crossplane functions, the database API, and the Application that watches `argocd/tenants/`. Expect roughly 2.5 to 5 minutes (see the measurements above). It is safe to re-run.
+This creates the k3d cluster (`bootstrap/k3d-config.yaml`), installs a pinned version of Argo CD (`bootstrap/argocd/`), and applies `argocd/root.yaml`. From that point Argo CD pulls everything else from Git: the operators, the Crossplane functions, the database API, and the Application that watches `argocd/tenants/`. Expect about 5 minutes until every Application is Healthy; most of it is the CloudNativePG operator (see the measurements above). It is safe to re-run.
 
 **3. Open Argo CD**
 
@@ -217,19 +216,16 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
 kubectl -n argocd get applications     # all should end up Synced / Healthy
 ```
 
-**5. Request a database**
+**5. Request a service and its database**
 
-Once the Applications are Synced and Crossplane is ready:
+Run the self-service form (see the golden path below). It creates the service's repository and commits the service's Application and its `PostgresDatabase` request to `argocd/tenants/<service>/`; Argo CD applies them on its next poll. Committing finished manifests there by hand also works. Then check:
 
 ```bash
-kubectl apply -f crossplane/examples/first-example.yaml
 kubectl get postgresdatabase           # READY=True after about a minute
-kubectl get cluster,pods -n example-postgresdatabase-db
+kubectl get cluster,pods -n <service>-db
 ```
 
-Deleting the request (`kubectl delete -f crossplane/examples/first-example.yaml`) removes the namespace and the database with its data.
-
-To get a whole service (repository, Application and database) the way the platform intends, run the self-service form (see the golden path below); it commits the files to `argocd/tenants/<service>/` for you, and Argo CD applies them on its next poll. Committing a manifest there by hand also works.
+Removing a service's folder from `argocd/tenants/` removes the service, its database and the data.
 
 **Tear down**
 
@@ -252,15 +248,15 @@ Rolling that image out is done by an Application in `argocd/tenants/` that combi
 - The service template exposes no application-level metrics; Phase 5 covers container-level metrics only.
 - Generated service repositories are public in this version, and so are their images.
 - The self-service form creates repositories with a fine-grained personal access token, which is broader than I would accept at scale.
-- Argo CD polls Git, and I measured 189 s and 261 s before it noticed a new tenant commit. This is the largest part of the form-to-service time. A webhook cannot reach a local k3d cluster, and I have not yet checked whether the polling interval can be shortened.
+- Argo CD polls Git every 3 minutes by default, and I measured 189 s and 261 s before it noticed a new tenant commit. This is the largest part of the form-to-service time. The interval is configurable and I left it at the default. A webhook cannot reach a local k3d cluster.
 - The generated service does not connect to its database. The database is provisioned and Ready, but credentials live in a Secret in the database's own namespace and nothing delivers them to the service yet (Phase 4).
 - The single `team` input is the service name, repository name, namespace and access group, so anyone who can run the form can grant any group the `edit` role in that namespace. That is harmless on a local cluster; splitting the input is planned for Phase 4.
 - Removing a service is a Git change, and Argo CD prunes automatically: deleting a service's folder deletes the service and, if it has one, its database and data. In one test, deleting a folder left the tenants Application OutOfSync until I deleted the Applications by hand; I have not found the cause, and the cluster where I saw it has since been deleted.
-- Failure handling is not built: if a form run stops half-way, the repository it created stays, and running the form again with the same name fails until that repository is removed by hand. Input checks (name rules, reserved names) run before anything is created.
+- Failure handling is not built: if a form run stops half-way, the repository it created stays, and running the form again with the same name fails until that repository is removed by hand. Input checks run before anything is created: name rules, reserved names (including any name ending in `-db`), an existing repository of the same name, and an existing tenant folder of the same name. Two runs started at the same moment can still both pass these checks. A run that times out while waiting for the image tag (the step limit is 5 minutes) is cancelled with GitHub's generic timeout message, not a specific one.
 - The CI bot commits directly to `main` in each service repo, which would not work with branch protection.
 - Database volumes cannot be resized (the local storage class disallows expansion), and deleting a request deletes its data.
 - No guardrails or secrets management yet; those are Phase 4. Database credentials live in the generated Kubernetes Secret.
-- Timings are from one local machine, several are single samples, the cold-start explanation was not verified, and a slow CloudNativePG step in a later rebuild is unexplained.
+- Timings are from one local machine, several are single samples, the cold-start explanation was not verified, and the slow start-up of the CloudNativePG operator (seen in two rebuilds) is unexplained.
 
 ## About This Project
 

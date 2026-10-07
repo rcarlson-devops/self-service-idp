@@ -1,32 +1,35 @@
 # Phase 1: Foundation
 
-**Status:** Complete (2026-10-01)
-**Exit criteria:** Push to Git, app deploys automatically with no manual `kubectl apply`. Met.
+**Status:** Complete (2026-10-01). Notes revised 2026-10-07 so they match the current repo; where something changed after Phase 1, it says so.
+
+**Exit criterion:** push to Git, and the app deploys automatically with no manual `kubectl apply`. Met.
 
 ## What was built
 
-- Local k3d cluster (1 server, 2 agents, k3s v1.35.5) created and configured by a single script, `bootstrap/bootstrap.sh`
+- A local k3d cluster (1 server, 2 agents, k3s v1.35.5) created by one script, `bootstrap/bootstrap.sh`
 - Argo CD v3.5.3 installed from a pinned Kustomize base, with the UI exposed declaratively
-- App-of-apps pattern: `argocd/root.yaml` is the only manual `kubectl apply`; everything else is discovered from Git
-- Go hello-world service with a Helm chart, built and pushed to private GHCR by GitHub Actions
-- CI commits an immutable `sha-<short>` tag back to `environments/dev/values-dev.yaml`, so Git records what is deployed. CI never touches the cluster.
+- The app-of-apps pattern: `argocd/root.yaml` is the only manual `kubectl apply`; everything else is discovered from Git
+- A Go hello-world service with a Helm chart, built and pushed to GHCR by GitHub Actions
+- CI that commits an immutable `sha-<short>` tag back to `environments/dev/values-dev.yaml`, so Git records what is deployed. CI never touches the cluster.
+
+In Phase 1 the service and its chart lived in this repo. Phase 3 moved service source into repos generated from a template; the shared chart stayed here.
 
 ## The loop
 
-1. Developer pushes code under `app/`
-2. GitHub Actions runs `go vet` and `go test`, builds the image, and pushes `sha-<short>` to GHCR
-3. The workflow commits the new tag to `environments/dev/values-dev.yaml`
-4. Argo CD detects the Git change and rolls out the new image
+1. A developer pushes code under `app/`.
+2. GitHub Actions runs `go vet` and `go test`, builds the image, and pushes `sha-<short>` to GHCR.
+3. The workflow commits the new tag to `environments/dev/values-dev.yaml`.
+4. Argo CD detects the Git change and rolls out the new image.
 
 ## Metrics
 
 | Metric | Value | Notes |
 |---|---|---|
-| Full rebuild (cluster delete to bootstrap complete) | 1 m 22 s | `time ./bootstrap/bootstrap.sh` |
-| CI duration (commit to bot tag commit) | ~65 s | From git timestamps; upper bound |
-| **Push to running pod, end to end** | **~1 m 45 s** | One measured run; default Argo polling (about 3 min interval), no webhook |
+| Full rebuild (cluster delete to bootstrap complete) | 1 m 22 s | `time ./bootstrap/bootstrap.sh`. This was before Crossplane and CloudNativePG existed. Later phases rebuild more, so the number is not comparable with them (see Phase 2 and the README) |
+| CI duration (commit to bot tag commit) | ~65 s | From git timestamps; an upper bound. Generated service repos later measured 62 s to 118 s |
+| Push to running pod, end to end | ~1 m 45 s | One sample. Argo CD polls Git on an interval and there is no webhook, so this varies from run to run; a later measurement of the polling wait is in the Phase 3 notes |
 
-The end-to-end figure is a single sample. Argo's default poll interval means it will vary run to run.
+The end-to-end figure is a single sample, and it landed early in the poll cycle. Do not read it as typical.
 
 ## Evidence
 
@@ -44,15 +47,19 @@ The end-to-end figure is a single sample. Argo's default poll interval means it 
 
 ## Problems hit and what they taught me
 
-- **Hand-edited Service.** The Argo CD UI was only reachable because of a manual edit to the `argocd-server` Service. I found it through the `last-applied-configuration` annotation and moved it into the Kustomize patch, so a rebuilt cluster is reachable with no hand edits.
-- **Reproducibility.** I proved the bootstrap by deleting the cluster and rebuilding from scratch: 1 m 22 s.
-- **SSH vs HTTPS repo URL.** A deploy-key-dependent SSH URL meant a fresh clone could not bootstrap. I switched to HTTPS on a public repo so bootstrap needs no credentials.
+- **Hand-edited Service.** The Argo CD UI was reachable only because of a manual edit to the `argocd-server` Service. I found it through the `last-applied-configuration` annotation and moved it into the Kustomize patch, so a rebuilt cluster is reachable with no hand edits.
+- **Reproducibility.** I proved the bootstrap by deleting the cluster and rebuilding from scratch.
+- **SSH vs HTTPS repo URL.** A deploy-key-dependent SSH URL meant a fresh clone could not bootstrap. I switched to HTTPS on a public repo, so bootstrap needs no credentials.
 - **Image tag default.** A never-published `dev-latest` default let a misconfiguration deploy silently. The chart now uses `required` for `image.tag`, so it fails at render time.
 - **Server-side apply.** The ApplicationSet CRD is too large for client-side apply ("annotation too long"), so Argo CD is installed with server-side apply.
 
-## Known gaps carried forward
+## What changed after Phase 1
 
-- Argo pickup is poll-based; a webhook would cut and stabilize the delay but needs a public endpoint (not available on k3d)
-- `ghcr-cred` pull secret is created from env vars by `bootstrap.sh`; replaced by External Secrets in Phase 4
-- The Go app has no `/metrics` endpoint yet (needed for Phase 5)
-- Chart `fullname` ignores the release name; must be fixed before the Phase 3 self-service workflow generates multiple services
+- **Images are public now.** Phase 1 used private GHCR images with a pull secret created from environment variables by `bootstrap.sh`. Generated service repos and their images are public, the cluster pulls anonymously, and the pull-secret hook has been removed from the chart. Public images are a stated limitation, not a goal.
+- **The chart's `fullname` now uses the release name.** Phase 1 ignored it, which would have made every generated service collide.
+- **The Go app still has no `/metrics` endpoint.** That is a decision, not an oversight: Phase 5 covers container-level metrics only.
+
+## Known gaps from this phase
+
+- Argo CD picks up changes by polling, and a local k3d cluster cannot receive a webhook. A webhook or a refresh trigger would remove the wait on a real cluster.
+- The single end-to-end sample above is not a benchmark.
