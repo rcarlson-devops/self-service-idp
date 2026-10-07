@@ -62,6 +62,11 @@ jobs:
             echo "rcarlson-devops/${TEAM} already exists" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
+          if gh repo read-dir "argocd/tenants/${TEAM}" &> /dev/null; then
+            echo "Tenant ${TEAM} already exists"
+            echo "Tenant ${TEAM} already exists" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi         
           echo "Validate Step Succeeded" >> $GITHUB_STEP_SUMMARY
   deploy_new_repo:
     runs-on: ubuntu-latest
@@ -116,13 +121,6 @@ jobs:
           done          
       - name: Checkout repository
         uses: actions/checkout@v7
-      - name: Check if tenants folder already exists
-        run: |
-          if [ -d "./argocd/tenants/${TEAM}" ]; then
-            echo "Tenant ${TEAM} already exists"
-            echo "Tenant ${TEAM} already exists" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
       - name: Create new tenants directory
         run: mkdir "./argocd/tenants/${TEAM}" 
       - name: Copy application.yaml.tmpl to tenants
