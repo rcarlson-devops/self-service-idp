@@ -62,7 +62,7 @@ jobs:
             echo "rcarlson-devops/${TEAM} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          if gh repo read-dir "argocd/tenants/${TEAM}" &> /dev/null; then
+          if gh repo read-dir "argocd/tenants/${TEAM}" --repo rcarlson-devops/self-service-idp &> /dev/null; then
             echo "Tenant ${TEAM} already exists"
             echo "Tenant ${TEAM} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
