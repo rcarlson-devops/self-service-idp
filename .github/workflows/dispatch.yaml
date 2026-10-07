@@ -71,6 +71,8 @@ jobs:
   populate_tenants:
     runs-on: ubuntu-latest
     needs: deploy_new_repo
+    permissions:
+      contents: write
     env:
       TEAM: ${{ inputs.team }}
       INSTANCES: ${{ inputs.instances }}
