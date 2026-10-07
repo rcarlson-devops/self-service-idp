@@ -87,7 +87,7 @@ jobs:
         run: |
           gh --version
           while true; do
-            if gh repo read-file "$FILE_PATH" --repo "$REPO" --output "$OUTPUT_PATH"; then
+            if gh repo read-file "$FILE_PATH" --repo "$REPO" --output "$OUTPUT_PATH" --clobber; then
               TARGET_VALUE=$(yq '.image.tag' "$OUTPUT_PATH")
               if [ "$TARGET_VALUE" != "null" ] && [ -n "$TARGET_VALUE" ]; then
                 echo "Values pushed"
