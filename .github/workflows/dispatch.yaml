@@ -26,9 +26,10 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     env:
-      TEAM: ${{ inputs.team }}
+      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT}}
       INSTANCES: ${{ inputs.instances }}
       SIZE: ${{ inputs.size }}
+      TEAM: ${{ inputs.team }}
     steps:
       - name: Validate inputs
         run: |
