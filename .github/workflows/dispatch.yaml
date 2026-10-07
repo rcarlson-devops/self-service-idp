@@ -44,6 +44,14 @@ jobs:
             echo "Error: Size must be small, medium, or large."
             exit 1
           fi
+          case "$TEAM" in
+            argocd|kube-system|default|crossplane-system|cnpg-system|\
+            cloudnativepg-operator|crossplane-functions|crossplane-operator|\
+            database-api|self-service-idp-root|self-service-idp-tenants)
+              echo "Error: '$TEAM' is a reserved name. Choose another."
+              exit 1
+              ;;
+          esac
   deploy_new_repo:
     runs-on: ubuntu-latest
     needs: validate
@@ -70,32 +78,26 @@ jobs:
     steps:
       - name: Poll new repo for commit
         env:
-          GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
-          TARGET_REPO: "rcarlson-devops/${{ inputs.team }}"
-          TARGET_BRANCH: "main"
           FILE_PATH: "environments/dev/values-dev.yaml"
+          GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
+          OUTPUT_PATH: "values-dev.yaml"
+          POLL_INTERVAL: 10
+          REPO: "rcarlson-devops/${{ inputs.team }}"
         timeout-minutes: 5
         run: |
-          INITIAL_FILE_SHA=$(gh api \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-Github-Api-Version: 2026-03-10" \
-            "/repos/${TARGET_REPO}/commits?path=${FILE_PATH}&sha=${TARGET_BRANCH}" \
-            | jq -r '.[0].sha')
-          echo "Initial file SHA: $INITIAL_FILE_SHA"
+          gh --version
           while true; do
-            LATEST_FILE_SHA=$(gh api \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-Github-Api-Version: 2026-03-10" \
-              "/repos/${TARGET_REPO}/commits?path=${FILE_PATH}&sha=${TARGET_BRANCH}" \
-              | jq -r '.[0].sha')
-            echo "Latest file SHA: $LATEST_FILE_SHA"
-            if [ "$LATEST_FILE_SHA" != "$INITIAL_FILE_SHA" ]; then
-              echo "New commit detected. Proceeding with the workflow."
-              break
+            if gh repo read-file "$FILE_PATH" --repo "$REPO" --output "$OUTPUT_PATH"; then
+              TARGET_VALUE=$(yq '.image.tag' "$OUTPUT_PATH")
+              if [ "$TARGET_VALUE" != "null" ] && [ -n "$TARGET_VALUE" ]; then
+                echo "Values pushed"
+                rm "$OUTPUT_PATH"
+                break
+              fi
             fi
-            echo "No new commit detected. Waiting for 20 seconds before checking again..."
-            sleep 20
-          done
+            echo "Values not pushed... Waiting $POLL_INTERVAL"
+            sleep "$POLL_INTERVAL"
+          done          
       - name: Checkout repository
         uses: actions/checkout@v7
       - name: Copy application.yaml.tmpl to tenants
