@@ -35,17 +35,17 @@ jobs:
         run: |
           if [[ ! "$TEAM" =~ ^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$ ]]; then
             echo "Error: Team name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen."
-            echo "Error: Team name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen." >> $GITHUB_STEP_SUMMARY
+            echo "Error: Team name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           if [[ ! "$INSTANCES" =~ ^[1-3]$ ]]; then
             echo "Error: Instances must be 1, 2, or 3."
-            echo "Error: Instances must be 1, 2, or 3." >> $GITHUB_STEP_SUMMARY
+            echo "Error: Instances must be 1, 2, or 3." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           if [[ ! "$SIZE" =~ ^(small|medium|large)$ ]]; then
             echo "Error: Size must be small, medium, or large."
-            echo "Error: Size must be small, medium, or large." >> $GITHUB_STEP_SUMMARY
+            echo "Error: Size must be small, medium, or large." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           case "$TEAM" in
@@ -53,21 +53,21 @@ jobs:
             cloudnativepg-operator|crossplane-functions|crossplane-operator|\
             database-api|self-service-idp-root|self-service-idp-tenants|*-db)
               echo "Error: '$TEAM' is a reserved name. Choose another."
-              echo "Error: '$TEAM' is a reserved name. Choose another." >> $GITHUB_STEP_SUMMARY
+              echo "Error: '$TEAM' is a reserved name. Choose another." >> "$GITHUB_STEP_SUMMARY"
               exit 1
               ;;
           esac
           if gh repo view "rcarlson-devops/${TEAM}" --json name > /dev/null 2>&1; then
             echo "rcarlson-devops/${TEAM} already exists"
-            echo "rcarlson-devops/${TEAM} already exists" >> $GITHUB_STEP_SUMMARY
+            echo "rcarlson-devops/${TEAM} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           if gh repo read-dir "argocd/tenants/${TEAM}" &> /dev/null; then
             echo "Tenant ${TEAM} already exists"
-            echo "Tenant ${TEAM} already exists" >> $GITHUB_STEP_SUMMARY
+            echo "Tenant ${TEAM} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi         
-          echo "Validate Step Succeeded" >> $GITHUB_STEP_SUMMARY
+          echo "Validate Step Succeeded" >> "$GITHUB_STEP_SUMMARY"
   deploy_new_repo:
     runs-on: ubuntu-latest
     needs: validate
@@ -84,7 +84,7 @@ jobs:
             "/repos/rcarlson-devops/go-app-template/generate" \
             -f name="${TEAM}" \
             -F private=false
-          echo "rcarlson-devops/${TEAM} created" >> $GITHUB_STEP_SUMMARY
+          echo "rcarlson-devops/${TEAM} created" >> "$GITHUB_STEP_SUMMARY"
   populate_tenants:
     runs-on: ubuntu-latest
     needs: deploy_new_repo
@@ -157,4 +157,4 @@ jobs:
           git commit -m "Add application and database manifests for team ${TEAM}"
           git pull --rebase
           git push origin HEAD:main
-          echo "**argocd/tenants/${TEAM}/application.yaml and database.yaml committed and pushed" >> $GITHUB_STEP_SUMMARY
+          echo "**argocd/tenants/${TEAM}/application.yaml and database.yaml committed and pushed" >> "$GITHUB_STEP_SUMMARY"
