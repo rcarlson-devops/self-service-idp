@@ -108,6 +108,7 @@ jobs:
         run: cp ./self-service/templates/database.yaml.tmpl "./argocd/tenants/${TEAM}/database.yaml"
       - name: Replace placeholders in application.yaml
         run: |
+          yq --version
           yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
           yq -i '(.spec.sources[] | select(.ref == "values")).repoURL = "https://github.com/rcarlson-devops/" + strenv(TEAM) + ".git"' "./argocd/tenants/${TEAM}/application.yaml"
           yq -i '(.spec.destination.namespace) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
