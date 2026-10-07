@@ -1,8 +1,0 @@
-apiVersion: rcarlsondevops.org/v1alpha1
-kind: PostgresDatabase
-metadata:
-  name: form-test2
-spec:
-  team: form-test2
-  instances: 1
-  size: small
