@@ -93,12 +93,12 @@ Because services and databases are defined in Git (`argocd/tenants/`), a rebuild
 Removing a service is a Git change, and Argo CD prunes automatically, so **deleting a service's folder under `argocd/tenants/` deletes its Deployment and, if it has one, its database and the data in it.**
 
 1. Delete `argocd/tenants/<service>/` (keep `argocd/tenants/.gitkeep`; Argo errors on an empty or missing folder), commit and push.
-2. Wait for the next Argo poll (about 3 minutes), then confirm it is gone: `kubectl get applications -n argocd` and `kubectl get postgresdatabase`.
+2. Wait for the next Argo poll, then confirm it is gone: `kubectl get applications -n argocd` and `kubectl get postgresdatabase`.
 3. Delete the service's GitHub repository.
 4. Delete its container package separately. A package is not removed with its repository (profile > Packages > the package > Package settings > Danger Zone).
 
 ## Known limits
 
-- Argo CD polls Git about every 3 minutes, so a new service can take up to that long to appear. A webhook would remove the wait, but a local k3d cluster is not reachable from GitHub.
+- Argo CD polls Git every 3 minutes, so a new service can take up to that long to appear. A webhook would remove the wait, but a local k3d cluster is not reachable from GitHub.
 - Generated service repositories are public.
 - The repository-creation token is broad, as described in step 2.
