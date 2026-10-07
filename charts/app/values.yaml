@@ -48,3 +48,7 @@ terminationGracePeriodSeconds: 20
 # "must have a cost-center label" policy from Phase 4.
 extraLabels:
   cost-center: platform-eng
+
+database:
+  # Name of kubernetes secret holding the database credentials. Created by KSO
+  secretName: db-credentials
