@@ -15,10 +15,6 @@ spec:
         {{- include "app.labels" . | nindent 8 }}
     spec:
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
-#      {{- with .Values.imagePullSecrets }}
-#      imagePullSecrets:
-#        {{- toYaml . | nindent 8 }}
-#      {{- end }}
       containers:
         - name: {{ include "app.name" . }}
           image: "{{ .Values.image.repository }}:{{ required "image.tag must be set; see environments/<env>/values-<env>.yaml" .Values.image.tag }}"

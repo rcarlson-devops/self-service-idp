@@ -48,6 +48,3 @@ terminationGracePeriodSeconds: 20
 # "must have a cost-center label" policy from Phase 4.
 extraLabels:
   cost-center: platform-eng
-
-# imagePullSecrets:
-#   - name: ghcr-cred
