@@ -52,6 +52,10 @@ jobs:
               exit 1
               ;;
           esac
+          if gh repo view "rcarlson-devops/${TEAM}" --json name > /dev/null 2>&1; then
+            echo "rcarlson-devops/${TEAM} already exists"
+            exit 1
+          fi
   deploy_new_repo:
     runs-on: ubuntu-latest
     needs: validate
@@ -104,8 +108,16 @@ jobs:
           done          
       - name: Checkout repository
         uses: actions/checkout@v7
+      - name: Check if tenants folder already exists
+        run: |
+          if [ -d "./argocd/tenants/${TEAM}" ]; then
+            echo "Tenant ${TEAM} already exists"
+            exit 1
+          fi
+      - name: Create new tenants directory
+        run: mkdir "./argocd/tenants/${TEAM}" 
       - name: Copy application.yaml.tmpl to tenants
-        run: "mkdir \"./argocd/tenants/${TEAM}\" \ncp ./self-service/templates/application.yaml.tmpl \"./argocd/tenants/${TEAM}/application.yaml\"\n"
+        run: cp "./self-service/templates/application.yaml.tmpl" "./argocd/tenants/${TEAM}/application.yaml"
       - name: Copy database.yaml.tmpl to tenants
         run: cp ./self-service/templates/database.yaml.tmpl "./argocd/tenants/${TEAM}/database.yaml"
       - name: Replace placeholders in application.yaml
