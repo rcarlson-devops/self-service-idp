@@ -1,6 +1,6 @@
 # One-time setup
 
-This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Step 4 is what you re-run whenever you rebuild the cluster.
+This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Steps 4 and 5 are what you re-run whenever you rebuild the cluster.
 
 Order matters: do the GitHub setup first, then bootstrap the cluster.
 
@@ -66,17 +66,55 @@ Notes:
 This is the part you repeat after every rebuild.
 
 1. From the repo root, run `bootstrap/bootstrap.sh`. It creates the k3d cluster if it is missing, installs Argo CD, waits for Argo's workloads, and applies `argocd/root.yaml`.
-2. Argo CD then installs everything else from Git. Wait until every Application is Synced and Healthy:
+2. Argo CD then installs everything else from Git. Wait until every Application **except Vault** is Synced and Healthy. Vault stays not Healthy until you initialize and unseal it in step 5:
    ```
    kubectl get applications -n argocd
    ```
-   You should see `cloudnativepg-operator`, `crossplane-functions`, `crossplane-operator`, `database-api`, `self-service-idp-root` and `self-service-idp-tenants`, plus one Application per service you have created.
+   You should see `cloudnativepg-operator`, `crossplane-functions`, `crossplane-operator`, `database-api`, `self-service-idp-root` and `self-service-idp-tenants`, plus the Vault and External Secrets Applications (check their exact names in the output) and one Application per service you have created.
 3. The Argo CD UI is at `http://127.0.0.1:8080`. The first admin password is generated at install time and is not in Git:
    ```
    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
    ```
 
-Because services and databases are defined in Git (`argocd/tenants/`), a rebuild brings them back automatically. Nothing from the cluster itself needs saving.
+Because services and databases are defined in Git (`argocd/tenants/`), a rebuild brings them back automatically. The one exception is Vault: its keys and contents belong to one cluster build (see step 5).
+
+## 5. Initialize and unseal Vault
+
+Vault runs in **standalone mode**. This is a deliberate choice: it is much closer to a production deployment than dev mode, which initializes and unseals itself. In standalone mode a new Vault starts **uninitialized and sealed**, and its pod is not Ready until you initialize and unseal it by hand. Argo CD cannot do this for you, and the keys it produces must never be committed to Git.
+
+Find the Vault pod and its namespace first. The commands below use `<vault-namespace>` and `<vault-pod>` as placeholders; the Helm chart's standalone pod is normally `vault-0`, but confirm it:
+
+```
+kubectl get pods -A | grep vault
+```
+
+1. **Check the state.** A new Vault reports `Initialized false` and `Sealed true`. The command may exit with a non-zero code while Vault is sealed; that is expected.
+   ```
+   kubectl exec -n <vault-namespace> <vault-pod> -- vault status
+   ```
+2. **Initialize, once.** This prints 5 unseal keys and an initial root token, one time only. By default the unseal key is split into 5 shares and any 3 of them unseal Vault.
+   ```
+   kubectl exec -n <vault-namespace> <vault-pod> -- vault operator init
+   ```
+   Copy all 5 keys and the root token into your password manager immediately. Do not redirect the output into a file in this repo, paste it into a chat, or commit it. Your terminal scrollback also holds it, so clear it afterwards.
+3. **Unseal, three times, with three different keys.** Run this three times. It prompts for a key without echoing it, which keeps the key out of your shell history; do not pass the key as a command-line argument.
+   ```
+   kubectl exec -it -n <vault-namespace> <vault-pod> -- vault operator unseal
+   ```
+4. **Verify.** `vault status` should now report `Initialized true` and `Sealed false`, and the Vault Application in Argo CD should turn Healthy:
+   ```
+   kubectl exec -n <vault-namespace> <vault-pod> -- vault status
+   kubectl get applications -n argocd
+   ```
+
+Things to know:
+
+- **Init is once per Vault, not once per restart.** Running it on an already initialized Vault is refused. If the Vault pod restarts it comes back sealed (the normal behavior without auto-unseal), and you repeat only step 3.
+- **A cluster rebuild means a new init.** After `k3d cluster delete` and a fresh bootstrap, the old keys are useless and Vault's old contents are gone. Repeat steps 1 to 4 and store the new keys. Anything that lived only in Vault has to be put back; the plan is that database passwords are repopulated from the CloudNativePG Secrets, which stay the source of truth.
+- **The root token is for one-time setup only.** Use it to configure Vault, then stop using it for day-to-day work.
+- **Not documented yet:** configuring Vault for External Secrets (the KV secrets engine, Kubernetes authentication, a least-privilege policy and a role). That has not been done; add the steps here when it is.
+
+Why a sealed Vault matters: External Secrets cannot read from a sealed Vault. Once services are wired to it, a sealed Vault would stop new services from receiving their credentials until someone unseals it. How Secrets that were already synced behave has not been tested yet.
 
 ## Where things live
 
@@ -87,6 +125,7 @@ Because services and databases are defined in Git (`argocd/tenants/`), a rebuild
 | Blueprints the form fills in | `self-service/templates/` (never synced by Argo) |
 | Shared Helm chart | `charts/app/` |
 | Secret for repo creation | Actions secret `REPO_CREATOR_PAT` |
+| Vault unseal keys and initial root token | Your password manager only, never in Git |
 
 ## Cleaning up a test service
 
@@ -102,3 +141,6 @@ Removing a service is a Git change, and Argo CD prunes automatically, so **delet
 - Argo CD polls Git every 3 minutes, so a new service can take up to that long to appear. A webhook would remove the wait, but a local k3d cluster is not reachable from GitHub.
 - Generated service repositories are public.
 - The repository-creation token is broad, as described in step 2.
+- Vault is a local approximation of a production deployment. It runs in standalone mode as a single replica, so there is no fault tolerance, and it talks plain HTTP inside the cluster (this version has no TLS).
+- Vault is unsealed by hand. Production would use auto-unseal backed by a cloud KMS or HSM; that is not available on a local, free-tier setup, and a script that holds the unseal keys would defeat the point. After every Vault pod restart or cluster rebuild a person has to unseal it, so the rebuild is not fully hands-off.
+- The unseal keys and root token are held by one person in a password manager. In production the key shares would be split between several people.
