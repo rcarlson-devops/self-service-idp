@@ -1,8 +1,8 @@
 # One-time setup
 
-This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Steps 4 to 6 are what you re-run whenever you rebuild the cluster.
+This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Steps 4 to 6 are what you re-run whenever you rebuild the cluster. Step 7 describes the manifests (kept in Git) that move the database password from CloudNativePG through Vault to the app; you re-apply them after a rebuild.
 
-Order matters: do the GitHub setup first, then bootstrap the cluster, then initialize Vault, then configure it for External Secrets.
+Order matters: do the GitHub setup first, then bootstrap the cluster, then initialize Vault, then configure it for External Secrets, then apply the credentials manifests.
 
 ## Prerequisites
 
@@ -98,7 +98,7 @@ kubectl get pods -A | grep vault
    ```
    kubectl exec -n vault vault-0 -- vault operator init
    ```
-   Copy all 5 keys and the root token into your password manager immediately. Do not redirect the output into a file in this repo, paste it into a chat, or commit it. Your terminal scrollback also holds it, so clear it afterwards.
+   Copy all 5 keys and the root token into `pass` (the Linux password store) immediately. Do not redirect the output into a file in this repo, paste it into a chat, or commit it. Your terminal scrollback also holds it, so clear it afterwards.
 3. **Unseal, three times, with three different keys.** Run this three times. It prompts for a key without echoing it, which keeps the key out of your shell history; do not pass the key as a command-line argument.
    ```
    kubectl exec -it -n vault vault-0 -- vault operator unseal
@@ -125,7 +125,7 @@ A freshly initialized Vault holds nothing and trusts nobody. This step teaches i
 
 ### 6a. Open a shell in the Vault pod and log in with the root token
 
-Run the Vault commands from inside the pod. `vault login` prompts for the token without echoing it, so it stays out of your shell history. Paste the root token from your password manager at the prompt:
+Run the Vault commands from inside the pod. `vault login` prompts for the token without echoing it, so it stays out of your shell history. Read the root token from `pass` and paste it at the prompt (do not put it on the command line):
 
 ```
 kubectl exec -it -n vault vault-0 -- sh
@@ -230,7 +230,7 @@ spec:
 ```
 
 - `server` is Vault's in-cluster Service address. Confirm the Service name with `kubectl get svc -n vault`. Never use `127.0.0.1` here either: inside the External Secrets pod that address is the pod itself.
-- If Argo applies this manifest, the External Secrets CRDs must already exist (they come from the External Secrets Application), so the store has to sync after it.
+- This manifest is kept in the monorepo at `argocd/apps/30-workloads/`, so Argo applies it. The External Secrets CRDs must already exist (they come from the External Secrets Application), so the store has to sync after them.
 
 Check that the store is accepted. It should report Valid and Ready, and Vault must be unsealed:
 
@@ -246,6 +246,132 @@ kubectl describe clustersecretstore vault-backend
 - **When a Kubernetes-auth login fails, read the config instead of guessing.** Vault logs nothing about a failed login at its default log level, so a `403` tells you very little. Run `vault read auth/kubernetes/config` and `vault read auth/kubernetes/role/eso` and compare them with 6c and 6e. A wrong `kubernetes_host` was the cause the one time this failed.
 - **Test from a one-shot command (6f), not from an interactive shell.** A login typed by hand into an interactive `sh` inside the pod failed once for a reason that was never found, while the one-shot form worked every time.
 
+## 7. Sync the database password into the app
+
+The app reads its database credentials from a Kubernetes Secret named `db-credentials` in its own namespace, with the keys `username`, `password` and `dbname` (the chart's `secretKeyRef` entries point at exactly that name). Nobody types these values. CloudNativePG generates the password and keeps it in a Secret named `postgres-db-app` in the database namespace (`<service>-db`). Two External Secrets objects carry it to the app, with Vault in between:
+
+```
+postgres-db-app            (namespace <service>-db, made by CloudNativePG)
+   |  PushSecret
+   v
+Vault: secret/tenants/<service>/db
+   |  ExternalSecret
+   v
+db-credentials             (namespace <service>, read by the app)
+```
+
+CloudNativePG stays the source of truth. If Vault is wiped, for example by a cluster rebuild, the `PushSecret` writes the password back.
+
+Before you start: step 6 is done, Vault is unsealed and `kubectl get clustersecretstore vault-backend` shows Valid.
+
+### 7a. The PushSecret (database namespace)
+
+A `PushSecret` reads a Secret from **its own namespace**, so it lives in `<service>-db`, next to `postgres-db-app`. Example for the service `form-test`, with one `match` per key:
+
+```yaml
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: db-credentials
+  namespace: form-test-db
+spec:
+  secretStoreRefs:
+    - name: vault-backend
+      kind: ClusterSecretStore
+  selector:
+    secret:
+      name: postgres-db-app
+  data:
+    - match:
+        secretKey: password
+        remoteRef:
+          remoteKey: tenants/form-test/db
+          property: password
+    - match:
+        secretKey: username
+        remoteRef:
+          remoteKey: tenants/form-test/db
+          property: username
+    - match:
+        secretKey: dbname
+        remoteRef:
+          remoteKey: tenants/form-test/db
+          property: dbname
+```
+
+- `kind: ClusterSecretStore` is required because the store reference defaults to a namespaced `SecretStore`.
+- `remoteKey` is the path **under the mount** (`tenants/form-test/db`, not `secret/tenants/...`), because the store sets `path: secret`.
+- Each `match` is a separate write, so the first push creates three versions of the Vault secret within milliseconds. That is expected.
+- `apiVersion` is whatever your cluster serves; check with `kubectl get crd pushsecrets.external-secrets.io -o jsonpath='{.spec.versions[*].name}'`.
+- The push needs the `eso` policy from 6d, including `create` and `update` on the **metadata** path. Without them it fails with `403 permission denied` on a `PUT` to `secret/metadata/tenants/...`.
+
+Check it: `kubectl get pushsecrets -n <service>-db` should show `Synced`. If it is `Errored`, `kubectl describe pushsecret db-credentials -n <service>-db` names the failing path or field.
+
+### 7b. Check what landed in Vault
+
+Read field names and non-secret values only, never print the password. With the root token (see the rules in step 6):
+
+```
+vault kv metadata get secret/tenants/<service>/db
+vault kv get -field=dbname secret/tenants/<service>/db
+```
+
+You should see the three keys merged into one secret, with the database name as the `dbname` value.
+
+### 7c. The ExternalSecret (app namespace)
+
+An `ExternalSecret` creates a Secret in **its own namespace**, so this one lives in `<service>`. This is the shape; your manifest in `vault-and-eso/` is the source of truth:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: db-credentials
+  namespace: form-test
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: db-credentials
+  data:
+    - secretKey: username
+      remoteRef:
+        key: tenants/form-test/db
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: tenants/form-test/db
+        property: password
+    - secretKey: dbname
+      remoteRef:
+        key: tenants/form-test/db
+        property: dbname
+```
+
+- `target.name` must be `db-credentials` with exactly the keys `username`, `password` and `dbname`. Without `target.name`, the Secret takes the `ExternalSecret`'s own name.
+- If a hand-made Secret of the same name exists, delete it first.
+- Check: `kubectl get externalsecret -n <service>` shows ready, and `kubectl get secret db-credentials -n <service>` exists.
+
+### 7d. Prove the app uses it
+
+A pod reads its environment variables from the Secret when it **starts**. A pod that was already running keeps whatever it had, so restart it before you test:
+
+```
+kubectl rollout restart deploy/<service> -n <service>
+kubectl port-forward -n <service> deploy/<service> 9000:8080
+curl -s localhost:9000/db
+```
+
+`{"configured":true,"connected":true,...}` from the restarted pod proves the synced Secret works. If the Secret is missing the pod sits in `CreateContainerConfigError`, which is also how you spot a broken sync.
+
+### 7e. Where these manifests live
+
+For now the `PushSecret` and `ExternalSecret` are kept in `vault-and-eso/` in the monorepo. That is a holding place, not a production design: each new service needs its own pair, so in production they would be generated per service instead of written by hand. How to automate that is an open design question.
+
+After a cluster rebuild, apply them in this order: the store is Valid (steps 5 and 6 done), then the `PushSecret` (it repopulates Vault from the CloudNativePG Secret), then the `ExternalSecret`. If Argo does not sync `vault-and-eso/`, apply it yourself with `kubectl apply -f vault-and-eso/`.
+
 ## Where things live
 
 | What | Where |
@@ -257,9 +383,11 @@ kubectl describe clustersecretstore vault-backend
 | Blueprints the form fills in | `self-service/templates/` (never synced by Argo) |
 | Shared Helm chart | `charts/app/` |
 | Secret for repo creation | Actions secret `REPO_CREATOR_PAT` |
-| Vault unseal keys and initial root token | Your password manager only, never in Git |
+| Vault unseal keys and initial root token | `pass` only, never in Git |
 | Vault configuration (KV engine, Kubernetes auth, policy `eso`, role `eso`) | Inside Vault only; redo step 6 after a rebuild |
 | Tenant secrets in Vault | `secret/tenants/<service>/db` |
+| ClusterSecretStore `vault-backend` | `argocd/apps/30-workloads/` |
+| `PushSecret` and `ExternalSecret` per service (interim home) | `vault-and-eso/` |
 
 ## Cleaning up a test service
 
@@ -269,7 +397,7 @@ Removing a service is a Git change, and Argo CD prunes automatically, so **delet
 2. Wait for the next Argo poll, then confirm it is gone: `kubectl get applications -n argocd` and `kubectl get postgresdatabase`.
 3. Delete the service's GitHub repository.
 4. Delete its container package separately. A package is not removed with its repository (profile > Packages > the package > Package settings > Danger Zone).
-5. If the service has a secret in Vault, delete it by hand with the root token, since deleting the folder does not touch Vault: `vault kv metadata delete secret/tenants/<service>/db`.
+5. If the service has a secret in Vault, delete it by hand with the root token, since deleting the folder does not touch Vault: `vault kv metadata delete secret/tenants/<service>/db`. Also remove the service's `PushSecret` and `ExternalSecret` manifests from `vault-and-eso/`.
 
 ## Known limits
 
@@ -278,7 +406,9 @@ Removing a service is a Git change, and Argo CD prunes automatically, so **delet
 - The repository-creation token is broad, as described in step 2.
 - Vault is a local approximation of a production deployment. It runs in standalone mode as a single replica, so there is no fault tolerance, and it talks plain HTTP inside the cluster (this version has no TLS).
 - Vault is unsealed by hand. Production would use auto-unseal backed by a cloud KMS or HSM; that is not available on a local, free-tier setup, and a script that holds the unseal keys would defeat the point. After every Vault pod restart or cluster rebuild a person has to unseal it, so the rebuild is not fully hands-off.
-- The unseal keys and root token are held by one person in a password manager. In production the key shares would be split between several people.
+- The unseal keys and root token are held by one person in `pass`. In production the key shares would be split between several people. `pass` encrypts with a GPG key, so back up that key safely: losing it means losing the Vault keys and root token.
 - Vault's configuration is not in Git, so every rebuild means repeating step 6 by hand.
 - All tenants share one External Secrets identity (the role `eso`). That identity can read every tenant's path under `secret/tenants/`, so a service is not limited to reading only its own secret. A per-tenant role and store would fix this, but something would have to create them for each new service; that is left for when the credentials path is automated.
 - What happens to a Secret that External Secrets already synced, and to a new service, while Vault is sealed has not been tested yet.
+- The `PushSecret` and `ExternalSecret` are written by hand per service and kept in `vault-and-eso/`. That is an interim holding place, not a production pattern: in production they would be generated for each new service. Automating it is open.
+- A pod reads its credentials Secret when it starts, so a changed password reaches a running pod only after a restart (believed; not tested here). Nothing restarts pods automatically yet.
