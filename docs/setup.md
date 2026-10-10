@@ -1,8 +1,8 @@
 # One-time setup
 
-This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Steps 4 and 5 are what you re-run whenever you rebuild the cluster.
+This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Steps 4 to 6 are what you re-run whenever you rebuild the cluster.
 
-Order matters: do the GitHub setup first, then bootstrap the cluster.
+Order matters: do the GitHub setup first, then bootstrap the cluster, then initialize Vault, then configure it for External Secrets.
 
 ## Prerequisites
 
@@ -71,18 +71,20 @@ This is the part you repeat after every rebuild.
    kubectl get applications -n argocd
    ```
    You should see `cloudnativepg-operator`, `crossplane-functions`, `crossplane-operator`, `database-api`, `self-service-idp-root` and `self-service-idp-tenants`, plus the Vault and External Secrets Applications (check their exact names in the output) and one Application per service you have created.
+   - The Vault Application is `argocd/apps/00-operators/hashicorp-vault.yaml` (Helm chart 0.34.1). It deploys into the `vault` namespace.
+   - The External Secrets Application is `argocd/apps/00-operators/external-secrets.yaml` (Helm chart 2.12.0). It deploys into the `external-secrets` namespace.
 3. The Argo CD UI is at `http://127.0.0.1:8080`. The first admin password is generated at install time and is not in Git:
    ```
    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
    ```
 
-Because services and databases are defined in Git (`argocd/tenants/`), a rebuild brings them back automatically. The one exception is Vault: its keys and contents belong to one cluster build (see step 5).
+Because services and databases are defined in Git (`argocd/tenants/`), a rebuild brings them back automatically. The exception is Vault: its keys, its configuration and its contents belong to one cluster build (see steps 5 and 6).
 
 ## 5. Initialize and unseal Vault
 
 Vault runs in **standalone mode**. This is a deliberate choice: it is much closer to a production deployment than dev mode, which initializes and unseals itself. In standalone mode a new Vault starts **uninitialized and sealed**, and its pod is not Ready until you initialize and unseal it by hand. Argo CD cannot do this for you, and the keys it produces must never be committed to Git.
 
-Find the Vault pod and its namespace first. The commands below use `<vault-namespace>` and `<vault-pod>` as placeholders; the Helm chart's standalone pod is normally `vault-0`, but confirm it:
+The Vault pod is `vault-0` in the namespace `vault`. If you ever need to confirm that:
 
 ```
 kubectl get pods -A | grep vault
@@ -90,20 +92,20 @@ kubectl get pods -A | grep vault
 
 1. **Check the state.** A new Vault reports `Initialized false` and `Sealed true`. The command may exit with a non-zero code while Vault is sealed; that is expected.
    ```
-   kubectl exec -n <vault-namespace> <vault-pod> -- vault status
+   kubectl exec -n vault vault-0 -- vault status
    ```
 2. **Initialize, once.** This prints 5 unseal keys and an initial root token, one time only. By default the unseal key is split into 5 shares and any 3 of them unseal Vault.
    ```
-   kubectl exec -n <vault-namespace> <vault-pod> -- vault operator init
+   kubectl exec -n vault vault-0 -- vault operator init
    ```
    Copy all 5 keys and the root token into your password manager immediately. Do not redirect the output into a file in this repo, paste it into a chat, or commit it. Your terminal scrollback also holds it, so clear it afterwards.
 3. **Unseal, three times, with three different keys.** Run this three times. It prompts for a key without echoing it, which keeps the key out of your shell history; do not pass the key as a command-line argument.
    ```
-   kubectl exec -it -n <vault-namespace> <vault-pod> -- vault operator unseal
+   kubectl exec -it -n vault vault-0 -- vault operator unseal
    ```
 4. **Verify.** `vault status` should now report `Initialized true` and `Sealed false`, and the Vault Application in Argo CD should turn Healthy:
    ```
-   kubectl exec -n <vault-namespace> <vault-pod> -- vault status
+   kubectl exec -n vault vault-0 -- vault status
    kubectl get applications -n argocd
    ```
 
@@ -111,21 +113,151 @@ Things to know:
 
 - **Init is once per Vault, not once per restart.** Running it on an already initialized Vault is refused. If the Vault pod restarts it comes back sealed (the normal behavior without auto-unseal), and you repeat only step 3.
 - **A cluster rebuild means a new init.** After `k3d cluster delete` and a fresh bootstrap, the old keys are useless and Vault's old contents are gone. Repeat steps 1 to 4 and store the new keys. Anything that lived only in Vault has to be put back; the plan is that database passwords are repopulated from the CloudNativePG Secrets, which stay the source of truth.
-- **The root token is for one-time setup only.** Use it to configure Vault, then stop using it for day-to-day work.
-- **Not documented yet:** configuring Vault for External Secrets (the KV secrets engine, Kubernetes authentication, a least-privilege policy and a role). That has not been done; add the steps here when it is.
+- **The root token is for one-time setup only.** Use it to configure Vault (step 6), then stop using it for day-to-day work.
 
 Why a sealed Vault matters: External Secrets cannot read from a sealed Vault. Once services are wired to it, a sealed Vault would stop new services from receiving their credentials until someone unseals it. How Secrets that were already synced behave has not been tested yet.
+
+## 6. Configure Vault for External Secrets
+
+A freshly initialized Vault holds nothing and trusts nobody. This step teaches it three things: where secrets live (a KV engine), how External Secrets proves who it is (Kubernetes auth), and what that identity may touch (a policy and a role). It is also the only step where you use the root token, so do it in one sitting.
+
+**This configuration lives inside Vault, not in Git.** A cluster rebuild loses it, so you repeat this whole step after every rebuild. (Putting it in a script is a possible later improvement; a script must never contain the root token or the unseal keys.)
+
+### 6a. Open a shell in the Vault pod and log in with the root token
+
+Run the Vault commands from inside the pod. `vault login` prompts for the token without echoing it, so it stays out of your shell history. Paste the root token from your password manager at the prompt:
+
+```
+kubectl exec -it -n vault vault-0 -- sh
+vault login
+```
+
+If `vault token lookup` shows anything other than the root token, an older token is in the way: run `unset VAULT_TOKEN`, `rm -f ~/.vault-token`, then `vault login` again.
+
+### 6b. Enable the KV secrets engine (version 2)
+
+Secrets go under the mount `secret/` (singular). KV version 2 stores the data at `secret/data/...` and its metadata at `secret/metadata/...`, which matters for the policy in 6d.
+
+```
+vault secrets enable -path=secret kv-v2
+```
+
+### 6c. Enable Kubernetes auth and point it at the cluster API
+
+```
+vault auth enable kubernetes
+vault write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc:443"
+```
+
+**Do not build `kubernetes_host` from `127.0.0.1` or from the pod's environment variables.** Inside a pod, `127.0.0.1` is the pod itself, so Vault would ask itself to validate the token instead of the Kubernetes API, and every login fails with `403 permission denied`. Use the in-cluster address above. Vault checks tokens using its own pod's service account and CA certificate, so nothing else needs configuring here.
+
+### 6d. Write the policy
+
+The policy `eso` lets the identity write and read secrets under `secret/tenants/` and nothing else:
+
+```
+vault policy write eso - <<EOF
+path "secret/data/tenants/*" {
+  capabilities = ["create", "read", "update"]
+}
+path "secret/metadata/tenants/*" {
+  capabilities = ["read", "list"]
+}
+EOF
+```
+
+The path scheme is `secret/tenants/<service>/db`. One policy covers both writing a secret into Vault and reading it back.
+
+### 6e. Create the role
+
+The role says which Kubernetes identity may log in and what it gets. It binds the service account `external-secrets` in the namespace `external-secrets` (the service account of the External Secrets controller) to the policy `eso`, for one hour per token:
+
+```
+vault write auth/kubernetes/role/eso \
+  bound_service_account_names=external-secrets \
+  bound_service_account_namespaces=external-secrets \
+  policies=eso \
+  ttl=1h
+```
+
+Leave the pod shell with `exit` when you are done.
+
+### 6f. Prove it works, and prove the limit holds
+
+Test from your laptop with a one-shot command. It asks Kubernetes for a short-lived token for the External Secrets service account, logs in as that identity **inside the pod**, and runs the checks. The Vault token it receives never leaves the pod, so there is nothing to copy or leak:
+
+```
+kubectl exec -n vault vault-0 -- env -u VAULT_TOKEN sh -c '
+  export VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login role=eso jwt="$1")
+  vault kv put secret/tenants/test/db password=x
+  vault kv get secret/tenants/test/db
+  vault kv put secret/other/x a=b
+' sh "$(kubectl create token external-secrets -n external-secrets)"
+```
+
+You want the login to work, the `put` and `get` on `secret/tenants/test/db` to succeed, and the `put` on `secret/other/x` to be refused with `403 permission denied`. The refusal is the point: it shows the identity cannot write outside `secret/tenants/`.
+
+Then delete the test secret with the root token. The `eso` policy cannot delete, which is deliberate. Open a root shell as in 6a and run (note `secret`, not `secrets`):
+
+```
+vault kv metadata delete secret/tenants/test/db
+```
+
+### 6g. Point External Secrets at Vault
+
+External Secrets reads from Vault through a `ClusterSecretStore` named `vault-backend`. It uses Kubernetes auth, so **it holds no token and no secret at all**:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: vault-backend
+spec:
+  provider:
+    vault:
+      server: http://vault.vault.svc.cluster.local:8200
+      path: secret
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: eso
+          serviceAccountRef:
+            name: external-secrets
+            namespace: external-secrets
+```
+
+- `server` is Vault's in-cluster Service address. Confirm the Service name with `kubectl get svc -n vault`. Never use `127.0.0.1` here either: inside the External Secrets pod that address is the pod itself.
+- If Argo applies this manifest, the External Secrets CRDs must already exist (they come from the External Secrets Application), so the store has to sync after it.
+
+Check that the store is accepted. It should report Valid and Ready, and Vault must be unsealed:
+
+```
+kubectl get clustersecretstore vault-backend
+kubectl describe clustersecretstore vault-backend
+```
+
+### Rules for this step
+
+- **Never put a Vault token in a Kubernetes Secret or a file.** An early attempt stored the root token in a Secret (`vault-token`) so the store could log in. That defeats the purpose of the root token being for one-time setup, because anyone who can read that Secret owns Vault. It was deleted, along with the local file that held the token, and replaced by Kubernetes auth. If a root token ever lands in a file, a Secret or a chat, revoke it (`vault token revoke`) and generate a new one.
+- **Never paste a token into a chat.** Accessors and key names are safe to share; the token itself is not. A token that has been pasted somewhere should be revoked, not left to expire.
+- **When a Kubernetes-auth login fails, read the config instead of guessing.** Vault logs nothing about a failed login at its default log level, so a `403` tells you very little. Run `vault read auth/kubernetes/config` and `vault read auth/kubernetes/role/eso` and compare them with 6c and 6e. A wrong `kubernetes_host` was the cause the one time this failed.
+- **Test from a one-shot command (6f), not from an interactive shell.** A login typed by hand into an interactive `sh` inside the pod failed once for a reason that was never found, while the one-shot form worked every time.
 
 ## Where things live
 
 | What | Where |
 |---|---|
 | Platform Applications (pointers only) | `argocd/apps/` |
+| Vault Application (chart 0.34.1, namespace `vault`) | `argocd/apps/00-operators/hashicorp-vault.yaml` |
+| External Secrets Application (chart 2.12.0, namespace `external-secrets`) | `argocd/apps/00-operators/external-secrets.yaml` |
 | Generated services and database requests | `argocd/tenants/<service>/` |
 | Blueprints the form fills in | `self-service/templates/` (never synced by Argo) |
 | Shared Helm chart | `charts/app/` |
 | Secret for repo creation | Actions secret `REPO_CREATOR_PAT` |
 | Vault unseal keys and initial root token | Your password manager only, never in Git |
+| Vault configuration (KV engine, Kubernetes auth, policy `eso`, role `eso`) | Inside Vault only; redo step 6 after a rebuild |
+| Tenant secrets in Vault | `secret/tenants/<service>/db` |
 
 ## Cleaning up a test service
 
@@ -135,6 +267,7 @@ Removing a service is a Git change, and Argo CD prunes automatically, so **delet
 2. Wait for the next Argo poll, then confirm it is gone: `kubectl get applications -n argocd` and `kubectl get postgresdatabase`.
 3. Delete the service's GitHub repository.
 4. Delete its container package separately. A package is not removed with its repository (profile > Packages > the package > Package settings > Danger Zone).
+5. If the service has a secret in Vault, delete it by hand with the root token, since deleting the folder does not touch Vault: `vault kv metadata delete secret/tenants/<service>/db`.
 
 ## Known limits
 
@@ -144,3 +277,6 @@ Removing a service is a Git change, and Argo CD prunes automatically, so **delet
 - Vault is a local approximation of a production deployment. It runs in standalone mode as a single replica, so there is no fault tolerance, and it talks plain HTTP inside the cluster (this version has no TLS).
 - Vault is unsealed by hand. Production would use auto-unseal backed by a cloud KMS or HSM; that is not available on a local, free-tier setup, and a script that holds the unseal keys would defeat the point. After every Vault pod restart or cluster rebuild a person has to unseal it, so the rebuild is not fully hands-off.
 - The unseal keys and root token are held by one person in a password manager. In production the key shares would be split between several people.
+- Vault's configuration is not in Git, so every rebuild means repeating step 6 by hand.
+- All tenants share one External Secrets identity (the role `eso`). That identity can read every tenant's path under `secret/tenants/`, so a service is not limited to reading only its own secret. A per-tenant role and store would fix this, but something would have to create them for each new service; that is left for when the credentials path is automated.
+- What happens to a Secret that External Secrets already synced, and to a new service, while Vault is sealed has not been tested yet.
