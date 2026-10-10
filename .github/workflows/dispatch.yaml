@@ -51,7 +51,7 @@ jobs:
           case "$TEAM" in
             argocd|kube-system|default|crossplane-system|cnpg-system|\
             cloudnativepg-operator|crossplane-functions|crossplane-operator|\
-            database-api|self-service-idp-root|self-service-idp-tenants|*-db)
+            database-api|self-service-idp-root|self-service-idp-tenants|*-db|vault|external-secrets)
               echo "Error: '$TEAM' is a reserved name. Choose another."
               echo "Error: '$TEAM' is a reserved name. Choose another." >> "$GITHUB_STEP_SUMMARY"
               exit 1
