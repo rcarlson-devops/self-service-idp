@@ -161,12 +161,14 @@ path "secret/data/tenants/*" {
   capabilities = ["create", "read", "update"]
 }
 path "secret/metadata/tenants/*" {
-  capabilities = ["read", "list"]
+  capabilities = ["create", "read", "update", "list"]
 }
 EOF
 ```
 
 The path scheme is `secret/tenants/<service>/db`. One policy covers both writing a secret into Vault and reading it back.
+
+The metadata path needs `create` and `update`, not just `read` and `list`: when a `PushSecret` writes a secret, External Secrets also writes to `secret/metadata/...`, and with read-only metadata access the push fails with `403 permission denied` on a `PUT` to that path. The policy deliberately has no `delete`.
 
 ### 6e. Create the role
 
