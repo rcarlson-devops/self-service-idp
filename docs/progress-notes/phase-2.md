@@ -113,6 +113,14 @@ I deleted the cluster and ran `bootstrap.sh`. The cluster came up with every App
 - [x] `kubectl auth can-i get pods -n kube-system --as=anyone --as-group=example-team` returns `no`
 - [x] RoleBinding sequencing: decided to leave it chained behind the database (it waits for both the namespace and the database), and not to split it into its own rule.
 - [ ] After the `resourceNames` fix, delete and re-apply the example XR and confirm the RoleBinding is still created and the XR reaches `READY=True`, and that the `--as-group` check in the team namespace still says `yes`.
+  - **Partly covered later (2026-10-10 review):** every database requested by the form in Phase 3 reached `READY=True` with the fixed role in place, and the XR's readiness includes the RoleBinding, so the first half held. The `--as-group` check in a team namespace was not repeated, so this box stays unticked.
+
+## What changed after Phase 2
+
+- **The form now creates the request.** `metadata.name` and `spec.team` are both set to the single name the developer types into the form, so the namespace is `<service>-db` and the group bound to `edit` is named after the service. That coupling is a known security limitation, tracked for Phase 4 (see the [Phase 3](phase-3.md) limitations).
+- **The Composition and the XRD have not changed** since this phase. The Composition is the same three Namespace, Cluster and RoleBinding resources.
+- **Credentials:** the generated `postgres-db-app` Secret is now the source for a Vault copy and a `db-credentials` Secret in the service's namespace. See [Phase 4](phase-4.md).
+- **Open from this phase and still open:** the Namespace rule still allows all verbs; no quotas; no backups or resize path.
 
 ## What I'd do at scale
 

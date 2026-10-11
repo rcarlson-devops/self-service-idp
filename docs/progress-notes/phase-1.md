@@ -1,6 +1,6 @@
 # Phase 1: Foundation
 
-**Status:** Complete (2026-10-01). Notes revised 2026-10-07 so they match the current repo; where something changed after Phase 1, it says so.
+**Status:** Complete (2026-10-01). Notes revised 2026-10-07 and again 2026-10-10 so they match the current repo; where something changed after Phase 1, it says so.
 
 **Exit criterion:** push to Git, and the app deploys automatically with no manual `kubectl apply`. Met.
 
@@ -58,6 +58,8 @@ The end-to-end figure is a single sample, and it landed early in the poll cycle.
 - **Images are public now.** Phase 1 used private GHCR images with a pull secret created from environment variables by `bootstrap.sh`. Generated service repos and their images are public, the cluster pulls anonymously, and the pull-secret hook has been removed from the chart. Public images are a stated limitation, not a goal.
 - **The chart's `fullname` now uses the release name.** Phase 1 ignored it, which would have made every generated service collide.
 - **The Go app still has no `/metrics` endpoint.** That is a decision, not an oversight: Phase 5 covers container-level metrics only.
+- **The app and chart gained a database connection (Phase 4).** The service now has a `/db` endpoint and reads `DB_HOST`, `DB_USER`, `DB_PASSWORD` and `DB_NAME`; the chart supplies them, with the three credentials coming from a Kubernetes Secret (`database.secretName`, default `db-credentials`). The Phase 1 loop above is unchanged. See [Phase 4](phase-4.md).
+- **Vault and External Secrets are now installed** alongside Argo CD, CloudNativePG and Crossplane, so a rebuild with `bootstrap.sh` now has two more Applications and a manual Vault step. The 1 m 22 s figure above predates all of that.
 
 ## Known gaps from this phase
 
