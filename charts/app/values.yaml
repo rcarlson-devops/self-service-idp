@@ -50,5 +50,5 @@ extraLabels:
   cost-center: platform-eng
 
 database:
-  # Name of kubernetes secret holding the database credentials. Created by KSO
+  # Name of kubernetes secret holding the database credentials. Created by KSO (External Secrets Operator)
   secretName: db-credentials
