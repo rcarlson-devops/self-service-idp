@@ -22,14 +22,16 @@ spec:
           identities:
             - subjectRegExp: '^https://github.com/rcarlson-devops/.+/\.github/workflows/.+@refs/heads/main$'
               issuer: 'https://token.actions.githubusercontent.com'
+        ctlog:
+          url: "https://rekor.sigstore.dev"
   attestations:
-    - name: sbom
+    - name: cosignAttestation
       intoto:
-        type: cosign.sigstore.dev/attestation/vuln/v1 # https://cyclonedx.org # sbom/cyclone-dx
+        type: https://cyclonedx.org/bom
   validations:
     - expression: >-
         images.containers.map(image, verifyImageSignatures(image, [attestors.cosign])).all(e, e > 0)
       message: "Failed to verify the image signature"
     - expression: >-
-        images.containers.map(image, verifyAttestationSignatures(image, attestations.sbom, [attestors.cosign])).all(e, e > 0)
+        images.containers.map(image, verifyAttestationSignatures(image, attestations.cosignAttestation, [attestors.cosign])).all(e, e > 0)
       message: "Failed to verify signature on the image's SBOM attestation"
