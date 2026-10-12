@@ -13,6 +13,9 @@ spec:
     targetRevision: 3.9.1
     helm:
       releaseName: kyverno
+      values: |
+        webhookLabels:
+          app.kubernetes.io/managed-by: argocd
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
