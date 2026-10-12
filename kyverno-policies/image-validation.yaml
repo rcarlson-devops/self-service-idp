@@ -3,6 +3,7 @@ kind: ImageValidatingPolicy
 metadata:
   name: image-check
 spec:
+  failurePolicy: Fail
   validationActions:
     - Deny
   matchConstraints:
