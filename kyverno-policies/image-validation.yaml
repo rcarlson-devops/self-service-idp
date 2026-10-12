@@ -5,6 +5,8 @@ metadata:
 spec:
   validationActions:
     - Audit
+  validationConfigurations:
+    verifyDigest: false
   matchConstraints:
     resourceRules:
       - apiGroups: ['']
