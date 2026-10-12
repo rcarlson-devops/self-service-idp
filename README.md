@@ -2,7 +2,7 @@
 
 > I built an internal developer platform that lets a developer go from "I need a new service with a database" to a running, observed, deployed application through a single self-service request — no tickets, no waiting on ops.
 
-That is the target. This README separates what is built and measured today from what is still planned. One gap matters most: the platform provisions the database and reports it Ready, and the credentials path (the CloudNativePG Secret, Vault, External Secrets, the service's own Secret) works end to end for one service, but I set it up by hand. The form does not create it for new services yet (Phase 4).
+That is the target. This README separates what is built and measured today from what is still planned. The platform provisions the database and reports it Ready, and the credentials path (the CloudNativePG Secret, Vault, External Secrets, the service's own Secret) is created automatically for every new service: the database's Composition creates the `PushSecret` and the shared chart creates the `ExternalSecret`. I have confirmed this end to end on one freshly generated service. What is still missing is the guardrails (image signing, policy, network isolation, quotas; Phase 4) and observability (Phase 5).
 
 ---
 
@@ -15,7 +15,7 @@ Built in phases; this table is the honest picture of what exists today.
 | 1. Foundation | k3d cluster, Argo CD (app-of-apps), containerized Go service, CI to GHCR, GitOps deploy | **Done** |
 | 2. Self-service infrastructure | Crossplane + CloudNativePG: one `PostgresDatabase` request creates a namespace, team RBAC, and a Postgres cluster | **Done** |
 | 3. Self-service request | GitHub Actions form: one typed request creates the service's own repo from a template and commits its Argo CD Application and database request to `argocd/tenants/`; Argo CD and Crossplane do the rest | **Working end to end** (three runs, each ending in a running service and a Ready database). Input checks and preflight are done; failure handling and a timing summary were postponed (see Known Limitations) |
-| 4. Guardrails | The service's database connection (External Secrets + Vault), image scanning and signing, Kyverno policies, default-deny network policies and quotas | **In progress.** Vault (standalone mode) and External Secrets are installed and configured, and the credentials path works by hand for one service (`form-test`). I also tested what happens when Vault is sealed. Next: decide how a rotated password reaches a running pod, then create the path automatically for every new service. Image signing, Kyverno, network policies and quotas are planned. Notes: [Phase 4](docs/progress-notes/phase-4.md) |
+| 4. Guardrails | The service's database connection (External Secrets + Vault), image scanning and signing, Kyverno policies, default-deny network policies and quotas | **In progress.** The database credentials path is done: Vault (standalone mode) and External Secrets are installed and configured, and a new service gets its credentials with no manual step (one fresh service tested). I also tested what happens when Vault is sealed. A changed password reaches a running pod only after a restart; that is documented, not automated. Image scanning and signing, Kyverno policies, network policies and quotas are planned. Problems hit so far: [troubleshooting log](docs/troubleshooting.md) |
 | 5. Observability | Container-level metrics and a per-service dashboard by default (Prometheus + Grafana) | Planned |
 | 6. Docs and metrics | Architecture diagram, golden path, before/after numbers | Ongoing |
 
@@ -30,17 +30,17 @@ Built in phases; this table is the honest picture of what exists today.
 | Argo CD sync to service Ready (hand-built tenant) | ~71 s | One forced sync; approximate, read from the Deployment's age rather than timestamps. Includes the image pull |
 | `git push` of a database request to Ready | 6 m 21 s | One sample, timed by clock. Includes Argo CD's polling wait, so it is not a platform time. It is longer than a poll plus the 50 s provisioning would suggest, and I have not yet worked out where the rest went |
 | CI duration | 62-118 s | Generated service repos; the spread has not been investigated |
-| Form submit to tenant commit, warm | 82 s and 133 s | Two samples. Includes validation, repo creation, the new repo's first CI run, and the form waiting for its image tag |
-| Argo CD detection delay (commit to the Application appearing) | 189 s and 261 s | Two samples. Argo CD's default polling interval is 3 minutes and nothing in this cluster changes it, so both samples exceeded it. I have not explained the excess; Argo's reconcile jitter is a candidate I have not confirmed |
-| Service platform time, warm | 7 s | Application creation to the pod being Ready |
-| Database request to Ready, measured on the form runs | 22-24 s warm, 67 s cold | Cold-start cause not confirmed. These runs used a different stopping point from the earlier database rows above, and I have not reconciled the two sets |
-| **Form submit to service Ready** | **278 s and 401 s** | Two samples. The largest part is Argo CD's polling wait, so it is reported separately from platform time |
+| Form submit to tenant commit, warm | 79 s, 82 s and 133 s | Three samples. Includes validation, repo creation, the new repo's first CI run, and the form waiting for its image tag |
+| Argo CD detection delay (commit to the Application appearing) | 167 s, 189 s and 261 s | Three samples. Argo CD's default polling interval is 3 minutes and nothing in this cluster changes it, so two of the three samples exceeded it. I have not explained the excess; Argo's reconcile jitter is a candidate I have not confirmed |
+| Service platform time, warm | 7 s (two runs before the credentials wiring); 35 s (one run with it) | Application creation to the pod being Ready. The longer figure is the pod waiting for its `db-credentials` Secret |
+| Database request to Ready, measured on the form runs | 22-24 s warm (three samples), 67 s cold | Cold-start cause not confirmed. These runs used a different stopping point from the earlier database rows above, and I have not reconciled the two sets |
+| **Form submit to service Ready** | **281 s** with the credentials path in place; earlier **278 s and 401 s** | The 281 s run (2026-10-12) is one sample: 79 s form to tenant commit, 167 s Argo CD detection delay, 35 s platform time. The largest part is Argo CD's polling wait, so it is reported separately from platform time. The earlier two samples predate the credentials wiring |
 
-The headline metric, developer request to deployed service, is now measured: 278 s and 401 s from submitting the form to a Ready service (two runs, local cluster). I report Argo CD's polling wait separately from platform time, because where a commit lands in the poll cycle changes it.
+The headline metric, developer request to deployed service, is measured: 281 s from submitting the form to a Ready service in the latest run, which has the credentials path in place (earlier runs: 278 s and 401 s; three runs, local cluster). I report Argo CD's polling wait separately from platform time, because where a commit lands in the poll cycle changes it.
 
-**These two runs predate the credentials wiring.** They ran on 2026-10-07 at about 03:10 to 03:40 UTC. The chart started reading the `db-credentials` Secret later that day (Git commit at 20:44 UTC). So the numbers describe a service that did not depend on its database Secret. I have not re-measured since, and a newly generated service now needs its credentials Secret before its pod can start (see Known Limitations). Treat 278 s and 401 s as the Phase 3 result, not as today's figure.
+**The first two runs predate the credentials wiring.** They ran on 2026-10-07 at about 03:10 to 03:40 UTC, and the chart started reading the `db-credentials` Secret later that day (Git commit at 20:44 UTC). So those numbers describe a service that did not depend on its database Secret. The 2026-10-12 run is the first with the credentials path in place. Platform time rose from 7 s to 35 s because the pod waits for its Secret: it was created at 00:39:14 UTC and `db-credentials` appeared at 00:39:43 UTC, and the pod was Ready at 00:39:47 UTC. With one run, I treat 281 s as the current figure and the earlier two as the Phase 3 result.
 
-Per-phase notes, including the problems hit and how they were solved: [Phase 1](docs/progress-notes/phase-1.md), [Phase 2](docs/progress-notes/phase-2.md), [Phase 3](docs/progress-notes/phase-3.md), [Phase 4, in progress](docs/progress-notes/phase-4.md).
+The problems I hit while building this, with their causes and fixes, are in the [troubleshooting log](docs/troubleshooting.md).
 
 ## The Problem
 
@@ -58,7 +58,7 @@ At most organizations, getting a new service into production means filing a tick
 6. Applies security and compliance guardrails automatically (no root containers, required labels, no plaintext secrets)
 7. Surfaces observability (metrics, dashboards) with zero extra setup
 
-**Working today:** steps 1 to 5. The form validates the request, creates the service's repository from `go-app-template` through the GitHub REST API (with a fine-grained token), waits for that repository's CI to publish the first image, and commits the Application and the database request to `argocd/tenants/`. Argo CD then deploys the service from the shared chart plus the service repo's values file, and Crossplane builds the database, with no `kubectl apply`. This has run end to end three times. **Not working yet:** credentials do not reach a new service automatically. For one service, `form-test`, I wired the path by hand: External Secrets copies the database password from the CloudNativePG Secret into Vault, then into a `db-credentials` Secret in the service's namespace, and the service connects with it (its `/db` endpoint reports connected). The form does not create those objects, and I have not re-run it since the chart started reading that Secret, so I expect a newly generated service to wait for its credentials until someone creates them (Phase 4). Behind the form, the database request is one small manifest:
+**Working today:** steps 1 to 5. The form validates the request, creates the service's repository from `go-app-template` through the GitHub REST API (with a fine-grained token), waits for that repository's CI to publish the first image, and commits the Application and the database request to `argocd/tenants/`. Argo CD then deploys the service from the shared chart plus the service repo's values file, and Crossplane builds the database, with no `kubectl apply`. This has run end to end four times. **Credentials are automatic too:** the database's Composition creates a `PushSecret` that copies the database password from the CloudNativePG Secret into Vault, and the shared chart creates an `ExternalSecret` that turns it into a `db-credentials` Secret in the service's namespace. On the latest run the service started with no manual step and its `/db` endpoint reported connected. Its pod could not start for about 29 s while it waited for that Secret. **Not working yet:** the guardrails (Phase 4) and the metrics (Phase 5). Behind the form, the database request is one small manifest:
 
 ```yaml
 apiVersion: rcarlsondevops.org/v1alpha1
@@ -75,7 +75,7 @@ Crossplane turns that into a Namespace (`<name>-db`), a CloudNativePG `Cluster` 
 
 ## Architecture
 
-What is built so far. Kyverno and Prometheus are not drawn because they do not exist yet. The credentials path is drawn with dashed lines because I applied it by hand for one service (`form-test`); the form does not create it. The form generates the files in `argocd/tenants/`; they can also still be placed by hand.
+What is built so far. Kyverno and Prometheus are not drawn because they do not exist yet. The credentials path is drawn with dashed lines for the data flow: the Composition creates the `PushSecret` and the shared chart creates the `ExternalSecret`. The form generates the files in `argocd/tenants/`; they can also still be placed by hand.
 
 ```mermaid
 flowchart LR
@@ -98,10 +98,12 @@ flowchart LR
     CP --> DB[CNPG Cluster]
     CP --> RB[RoleBinding]
     CNPG -.->|runs| DB
-    DB -.->|postgres-db-app Secret| PS[PushSecret, by hand]
+    DB -.->|postgres-db-app Secret| PS[PushSecret, from the Composition]
     PS -.-> Vault[(Vault, standalone)]
-    Vault -.-> ES[ExternalSecret, by hand]
+    Vault -.-> ES[ExternalSecret, from the chart]
     ES -.->|db-credentials Secret| Dep
+    CP --> PS
+    App --> ES
 ```
 
 ## Stack
@@ -118,7 +120,7 @@ flowchart LR
 | Tenant discovery | One recursive Argo CD Application (sync wave 3) on `argocd/tenants/` | In use | One folder per service; picks up generated Applications and database requests, after the database API is installed |
 | Self-service front door | GitHub Actions (`workflow_dispatch` form) | In use | One typed form as the single entry point; no extra tooling to host |
 | Policy as code | Kyverno | Phase 4 | Guardrails enforced automatically, not reviewed manually |
-| Secrets | External Secrets Operator (chart 2.12.0) + HashiCorp Vault (chart 0.34.1, standalone mode) | In use for one service, by hand; automation in Phase 4 | No plaintext secrets ever committed to Git; Git holds only references. Standalone rather than dev mode on purpose: I wanted it as close to a production deployment as a local cluster allows, so it has to be initialized and unsealed by hand |
+| Secrets | External Secrets Operator (chart 2.12.0) + HashiCorp Vault (chart 0.34.1, standalone mode) | In use; created automatically for each service | No plaintext secrets ever committed to Git; Git holds only references. Standalone rather than dev mode on purpose: I wanted it as close to a production deployment as a local cluster allows, so it has to be initialized and unsealed by hand |
 | Observability | Prometheus + Grafana | Phase 5 | Metrics available by default for anything deployed through the platform |
 
 ## Design Decisions Worth Knowing
@@ -156,7 +158,7 @@ Each choice below has an alternative and a price. The price is the part worth re
 
 ## The Golden Path: New Service in Under 10 Minutes
 
-_Measured on a local cluster: 278 s and 401 s from submitting the form to a Ready service (two runs). Two parts are not there yet: the Grafana metrics in step 6 arrive in Phase 5, and the form does not set up the service's credentials until Phase 4._
+_Measured on a local cluster: 281 s from submitting the form to a Ready service in the latest run, with the service's credentials set up automatically (earlier runs: 278 s and 401 s). One part is not there yet: the Grafana metrics in step 6 arrive in Phase 5._
 
 1. Open the platform repo's **Actions** tab, select the self-service workflow, and click **Run workflow**
 2. Fill in the service and team name, the number of database instances, and the database size
@@ -199,8 +201,8 @@ _Measured on a local cluster: 278 s and 401 s from submitting the form to a Read
 │   └── api/                 Crossplane RBAC; database/ holds the XRD and Composition
 ├── self-service/
 │   └── templates/           Application and database blueprints the form fills in (not synced by Argo CD)
-├── docs/                    Request format doc, one-time setup, and per-phase progress notes (phase-1 to phase-4)
-└── vault-and-eso/           form-test's PushSecret and ExternalSecret, applied by hand (Argo CD does not sync this folder)
+├── docs/                    Request format doc, one-time setup, and the troubleshooting log
+└── vault-and-eso/           the original hand-applied PushSecret and ExternalSecret manifests for form-test, superseded by the Composition and the chart (Argo CD does not sync this folder)
 ```
 
 Service source code does not live in this repo. Each service is generated into its own repository from the `go-app-template` template repo. Folders for later work (`policies/`, `observability/`) are added as those phases start. The Argo CD Applications for Vault and External Secrets are `hashicorp-vault` and `external-secrets-operator`. Ordering between components comes from sync-wave annotations on the Applications, not from folder name prefixes.
@@ -278,15 +280,15 @@ Rolling that image out is done by an Application in `argocd/tenants/` that combi
 - Generated service repositories are public in this version, and so are their images.
 - The self-service form creates repositories with a fine-grained personal access token, which is broader than I would accept at scale.
 - Argo CD polls Git every 3 minutes by default, and I measured 189 s and 261 s before it noticed a new tenant commit. This is the largest part of the form-to-service time. The interval is configurable and I left it at the default. A webhook cannot reach a local k3d cluster.
-- Credentials are delivered to a service only by hand. For `form-test` I applied a `PushSecret` and an `ExternalSecret` myself (kept in `vault-and-eso/`, which Argo CD does not sync), and that works. The form does not create them, so a newly generated service has no `db-credentials` Secret, and I expect its pod to sit in `CreateContainerConfigError` until someone creates one; I have not regenerated a service to confirm. Automating this per service is the next piece of Phase 4. The open design problem is ordering: the database's namespace and Secret must exist before the `PushSecret` can sync.
-- A changed database password reaches a running service only after the pod restarts. A change in the CloudNativePG Secret flows through the PushSecret (hourly) and the ExternalSecret (15 s) into db-credentials, but environment variables are read when a container starts, so a running pod keeps the old value until it is restarted (kubectl rollout restart deploy/<service>). That is standard Kubernetes behavior; I have not tested it here. I found nothing saying CloudNativePG rotates the password by itself, and nothing in this platform rotates it today. I did not add a restarter such as Stakater Reloader.
+- Credentials are created automatically, with caveats. The `PushSecret` comes from the database's Composition and the `ExternalSecret` from the shared chart, so a new service needs no manual step (one fresh service tested on 2026-10-12). Ordering is not enforced: each piece retries until the one before it exists. In that run the pod was created at 00:39:14 UTC and its `db-credentials` Secret at 00:39:43 UTC, and until then the pod reported a missing Secret.
+- A changed database password reaches a running service only after the pod restarts. A change in the CloudNativePG Secret flows through the `PushSecret` (hourly) and the `ExternalSecret` (15 s) into `db-credentials`, but environment variables are read when a container starts, so a running pod keeps the old value until it is restarted (`kubectl rollout restart deploy/<service>`). That is standard Kubernetes behavior; I have not tested it here. I did not add a restarter such as Stakater Reloader.
 - The single `team` input is the service name, repository name, namespace and access group, so anyone who can run the form can grant any group the `edit` role in that namespace. That is harmless on a local cluster; splitting the input is planned for Phase 4.
-- Removing a service is a Git change, and Argo CD prunes automatically: deleting a service's folder deletes the service and, if it has one, its database and data. In one test, deleting a folder left the tenants Application OutOfSync until I deleted the Applications by hand; I have not found the cause, and the cluster where I saw it has since been deleted. Nothing cleans up a removed service's entry in Vault or its hand-applied credentials manifests.
+- Removing a service is a Git change, and Argo CD prunes automatically: deleting a service's folder deletes the service and, if it has one, its database and data. Deleting the only tenant's folder left the tenants Application OutOfSync with the service still running: Argo CD's `SyncError` said `auto-sync will wipe out all resources`, because automated sync with prune refuses a change that would remove everything in an Application. I left that safeguard on, so removing the last tenant needs a manual step. Once a new tenant existed, the next sync pruned the deleted one. When `form-test` was removed, its database namespace (`form-test-db`, created by Crossplane) was deleted, but its service namespace (`form-test`, created by Argo CD's `CreateNamespace` sync option) stayed behind, empty as far as I could see. Nothing cleans up a removed service's entry in Vault, its GitHub repository, its image or that empty namespace.
 - Failure handling is not built: if a form run stops half-way, the repository it created stays, and running the form again with the same name fails until that repository is removed by hand. Input checks run before anything is created: name rules, reserved names (including any name ending in `-db`), an existing repository of the same name, and an existing tenant folder of the same name. The reserved-name list now also covers the Vault and External Secrets Application names (`hashicorp-vault`, `external-secrets-operator`) and the built-in `kube-public` and `kube-node-lease` namespaces. Two runs started at the same moment can still both pass these checks. A run that times out while waiting for the image tag (the step limit is 5 minutes) is cancelled with GitHub's generic timeout message, not a specific one.
 - The CI bot commits directly to `main` in each service repo, which would not work with branch protection.
 - The service's `/db` endpoint is unauthenticated and opens a new database connection on every call. That is acceptable on a local cluster and is not something to expose. I have not set `sslmode` in the connection URL; I believe the driver tries TLS and falls back to plain without verifying the certificate, but I have not checked which one is used here, so treat database connections as unencrypted.
 - Database volumes cannot be resized (the local storage class disallows expansion), and deleting a request deletes its data.
-- No guardrails yet (Phase 4). Secrets management is half built: the credentials path works for one service by hand (above), and the database password also still sits in the Secret CloudNativePG generates, which is where Vault's copy comes from.
+- No guardrails yet (Phase 4). Secrets management covers the database password only: it reaches each service through Vault and External Secrets with nothing in Git, but every service shares one Vault role that can read every service's path under `tenants/`, and the password also still sits in the Secret CloudNativePG generates, which is where Vault's copy comes from.
 - Vault is a local approximation of a production deployment. It runs in standalone mode as a single replica, so it has no fault tolerance; it uses plain HTTP inside the cluster; and it is unsealed by hand, because auto-unseal needs a cloud KMS that a local free-tier setup does not have. The unseal keys and root token are held by one person in a password manager. A cluster rebuild means a new init and new keys, and Vault's contents are lost. A Vault pod restart leaves it sealed until someone unseals it. I tested this once by deleting the Vault pod: its data survived (it is on a persistent volume) and it came back sealed. While it was sealed, the Secret already synced into the service's namespace stayed in place, the running service kept its database connection, and a restarted service pod still came up, because it needs the Secret and not Vault. New Secrets could not be synced, and the External Secrets store reported errors until Vault was unsealed (its status lagged the seal at first). After the unseal, syncing resumed with no action, in about 4 minutes 19 seconds in that one run. A sealed Vault therefore blocks new services and credential changes but not running ones. I did not test what the `PushSecret` does while Vault is sealed.
 - Timings are from one local machine, several are single samples, the cold-start explanation was not verified, and the slow start-up of the CloudNativePG operator (seen in two rebuilds) is unexplained.
 
