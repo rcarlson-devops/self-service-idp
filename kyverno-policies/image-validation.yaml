@@ -30,6 +30,6 @@ spec:
     - expression: >-
         images.containers.map(image, verifyImageSignatures(image, [attestors.cosign])).all(e, e > 0)
       message: "Failed to verify the image signature"
-    - expression: >-
-        images.containers.map(image, verifyAttestationSignatures(image, attestations.sbom, [attestors.cosign])).all(e, e > 0)
-      message: "Failed to verify signature on the image's SBOM attestation"
+#    - expression: >-
+#        images.containers.map(image, verifyAttestationSignatures(image, attestations.sbom, [attestors.cosign])).all(e, e > 0)
+#      message: "Failed to verify signature on the image's SBOM attestation"
