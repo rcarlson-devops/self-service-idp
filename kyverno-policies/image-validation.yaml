@@ -25,7 +25,7 @@ spec:
   attestations:
     - name: sbom
       intoto:
-        type: https://cyclonedx.org # sbom/cyclone-dx
+        type: cosign.sigstore.dev/attestation/vuln/v1 # https://cyclonedx.org # sbom/cyclone-dx
   validations:
     - expression: >-
         images.containers.map(image, verifyImageSignatures(image, [attestors.cosign])).all(e, e > 0)
