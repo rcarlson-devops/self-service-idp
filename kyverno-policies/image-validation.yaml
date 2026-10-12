@@ -4,7 +4,7 @@ metadata:
   name: image-check
 spec:
   validationActions:
-    - Audit
+    - Deny
   matchConstraints:
     resourceRules:
       - apiGroups: ['']
