@@ -24,12 +24,12 @@ spec:
               issuer: 'https://token.actions.githubusercontent.com'
   attestations:
     - name: sbom
-      referrer:
-        type: sbom/cyclone-dx
+      intoto:
+        type: https://cyclonedx.org # sbom/cyclone-dx
   validations:
     - expression: >-
         images.containers.map(image, verifyImageSignatures(image, [attestors.cosign])).all(e, e > 0)
       message: "Failed to verify the image signature"
     - expression: >-
-        images.containers.map(image, verifyAttestationSignatures(image, "sbom", [attestors.cosign])).all(e, e > 0)
+        images.containers.map(image, verifyAttestationSignatures(image, attestations.sbom, [attestors.cosign])).all(e, e > 0)
       message: "Failed to verify signature on the image's SBOM attestation"
