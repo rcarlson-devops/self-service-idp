@@ -22,3 +22,6 @@ rules:
 - apiGroups: ["external-secrets.io"]
   resources: ["pushsecrets"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["create", "update", "delete", "patch", "get", "list", "watch"]
