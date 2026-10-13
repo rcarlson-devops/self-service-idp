@@ -19,7 +19,7 @@ spec:
 
 There are two ways to submit it:
 
-- **Through the self-service form** (the normal path). The form creates the service's repository and commits this manifest, filled in for you, to `argocd/tenants/<service>/database.yaml`; Argo CD applies it. The form sets `metadata.name` and `spec.team` to the same name you typed, so the namespace is `<service>-db` and the group that gets `edit` is named after the service.
+- **Through the self-service form** (the normal path). The form creates the service's repository and commits this manifest, filled in for you, to `argocd/tenants/<service>/database.yaml`; Argo CD applies it. The form sets `metadata.name` to the service name and `spec.team` to the team name you entered, so the namespace is `<service>-db` and the group that gets `edit` is the team.
 - **By hand:** `kubectl apply -f <file>`, or commit finished YAML under `argocd/tenants/`. The manifest is the same either way.
 
 ## Fields
