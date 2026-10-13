@@ -15,10 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CONFIRM: ${{ inputs.confirm }}
+      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT}}
       SERVICE: ${{ inputs.service }}
     steps:
-      - name: Validating GH
-        run: which gh
       - name: Validate inputs
         run: |
           if [[ "$SERVICE" != "$CONFIRM" ]]; then
