@@ -60,7 +60,11 @@ jobs:
           fi
           case "$TEAM" in
             dev-team-?*) ;;
-            *) echo "Error: team must start with dev-team-"; exit 1 ;;
+            *) 
+              echo "Error: team must start with dev-team-"
+              echo "Error: team must start with dev-team-" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+              ;;
           esac
           case "$SERVICE" in
             argocd|kube-system|default|crossplane-system|cnpg-system|\
