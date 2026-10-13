@@ -1,8 +1,8 @@
 # One-time setup
 
-This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Steps 4 to 6 are what you re-run whenever you rebuild the cluster. Step 7 describes the manifests that move the database password from CloudNativePG through Vault to the app. They are kept in Git, in `vault-and-eso/`, but Argo CD does **not** sync that folder, so you apply them by hand after a rebuild.
+This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Steps 4 to 6 are what you re-run whenever you rebuild the cluster. Step 7 describes how the database password moves from CloudNativePG through Vault to the app. Nothing in step 7 is applied by hand: the database Composition and the shared chart create those objects for every service.
 
-Order matters: do the GitHub setup first, then bootstrap the cluster, then initialize Vault, then configure it for External Secrets, then apply the credentials manifests.
+Order matters: do the GitHub setup first, then bootstrap the cluster, then initialize Vault, then configure it for External Secrets. After that, every service brings its own credentials objects.
 
 ## Prerequisites
 
@@ -70,18 +70,18 @@ This is the part you repeat after every rebuild.
    ```
    kubectl get applications -n argocd
    ```
-   You should see `cloudnativepg-operator`, `crossplane-functions`, `crossplane-operator`, `database-api`, `external-secrets-operator`, `hashicorp-vault`, `self-service-idp-root` and `self-service-idp-tenants`, plus one Application per service you have created.
-   - The Vault Application is `argocd/apps/00-operators/hashicorp-vault.yaml` (Helm chart 0.34.1). It deploys into the `vault` namespace.
-   - The External Secrets Application is `external-secrets-operator` in `argocd/apps/00-operators/external-secrets.yaml` (Helm chart 2.12.0). It deploys into the `external-secrets` namespace.
+   You should see `cloudnativepg-operator`, `crossplane-functions`, `crossplane-operator`, `database-api`, `external-secrets-operator`, `hashicorp-vault`, the Kyverno install, `kyverno-policies`, `self-service-idp-root` and `self-service-idp-tenants`, plus one Application per service you have created.
+   - The Vault Application is `argocd/apps/operators/hashicorp-vault.yaml` (Helm chart 0.34.1). It deploys into the `vault` namespace.
+   - The External Secrets Application is `external-secrets-operator` in `argocd/apps/operators/external-secrets.yaml` (Helm chart 2.12.0). It deploys into the `external-secrets` namespace.
    - The Vault Application is named `hashicorp-vault`, and its values set `global.tlsDisable: true`, so Vault serves plain HTTP inside the cluster.
 3. The Argo CD UI is at `https://localhost:8080` (self-signed certificate; the bootstrap script suggests trying `http://` if https fails). The first admin password is generated at install time and is not in Git:
    ```
    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
    ```
 
-Because services and databases are defined in Git (`argocd/tenants/`), a rebuild brings them back automatically. The exceptions are Vault (its keys, its configuration and its contents belong to one cluster build; see steps 5 and 6) and the per-service credentials manifests in `vault-and-eso/` (step 7).
+Because services and databases are defined in Git (`argocd/tenants/`), a rebuild brings them back automatically. The exception is Vault: its keys, its configuration and its contents belong to one cluster build (steps 5 and 6). Once Vault is configured and unsealed, the credentials objects of the returning services sync again (step 7).
 
-The `vault-backend` store (`argocd/apps/30-workloads/vault-backend.yaml`) is applied by the root Application together with the External Secrets Application, and it needs the External Secrets CRDs. It has not been tested on a fresh rebuild since it was added. If the store is missing or the root Application reports a sync error about an unknown kind after a rebuild, sync the root Application again once External Secrets is Healthy.
+The `vault-backend` store (`argocd/apps/platform/vault-backend.yaml`) is applied by the root Application together with the External Secrets Application, and it needs the External Secrets CRDs. It has not been tested on a fresh rebuild since it was added. If the store is missing or the root Application reports a sync error about an unknown kind after a rebuild, sync the root Application again once External Secrets is Healthy.
 
 ## 5. Initialize and unseal Vault
 
@@ -124,7 +124,7 @@ Why a sealed Vault matters: External Secrets cannot read from a sealed Vault, so
 
 A freshly initialized Vault holds nothing and trusts nobody. This step teaches it three things: where secrets live (a KV engine), how External Secrets proves who it is (Kubernetes auth), and what that identity may touch (a policy and a role). It is also the only step where you use the root token, so do it in one sitting.
 
-**This configuration lives inside Vault, not in Git.** A cluster rebuild loses it, so you repeat this whole step after every rebuild. (Putting it in a script is a possible later improvement; a script must never contain the root token or the unseal keys.)
+**This configuration lives inside Vault, not in Git.** A cluster rebuild loses it, so you repeat this whole step after every rebuild. (Moving this step into the bootstrap scripts is planned for later. A script must never contain the root token or the unseal keys.)
 
 ### 6a. Open a shell in the Vault pod and log in with the root token
 
@@ -166,22 +166,24 @@ vault write auth/kubernetes/config kubernetes_host="https://kubernetes.default.s
 
 ### 6d. Write the policy
 
-The policy `eso` lets the identity write and read secrets under `secret/tenants/` and nothing else:
+The policy `eso` lets the identity write, read and delete secrets under `secret/tenants/` and nothing else:
 
 ```
 vault policy write eso - <<EOF
 path "secret/data/tenants/*" {
-  capabilities = ["create", "read", "update"]
+  capabilities = ["create", "read", "update", "delete"]
 }
 path "secret/metadata/tenants/*" {
-  capabilities = ["create", "read", "update", "list"]
+  capabilities = ["create", "read", "update", "list", "delete"]
 }
 EOF
 ```
 
 The path scheme is `secret/tenants/<service>/db`. One policy covers both writing a secret into Vault and reading it back.
 
-The metadata path needs `create` and `update`, not just `read` and `list`: when a `PushSecret` writes a secret, External Secrets also writes to `secret/metadata/...`, and with read-only metadata access the push fails with `403 permission denied` on a `PUT` to that path. The policy deliberately has no `delete`.
+The metadata path needs `create` and `update`, not just `read` and `list`: when a `PushSecret` writes a secret, External Secrets also writes to `secret/metadata/...`, and with read-only metadata access the push fails with `403 permission denied` on a `PUT` to that path. `delete` is there because the `PushSecret` the Composition creates uses `deletionPolicy: Delete`: when a service is removed, External Secrets deletes that service's entry from Vault, and Vault refuses unless the policy allows it. In a test, deleting the `PushSecret` removed the entry through the `metadata` path (the entry's `created_time` changed), so keep `delete` on both paths. Without it, the entry is not removed and the `PushSecret` reports an error.
+
+**Cluster set up before 2026-10-13:** `vault policy write` replaces the whole policy, so run `vault policy read eso` first, then write the full text above. The role from 6e needs no change.
 
 ### 6e. Create the role
 
@@ -212,7 +214,7 @@ kubectl exec -n vault vault-0 -- env -u VAULT_TOKEN sh -c '
 
 You want the login to work, the `put` and `get` on `secret/tenants/test/db` to succeed, and the `put` on `secret/other/x` to be refused with `403 permission denied`. The refusal is the point: it shows the identity cannot write outside `secret/tenants/`.
 
-Then delete the test secret with the root token. The `eso` policy cannot delete, which is deliberate. Open a root shell as in 6a and run (note `secret`, not `secrets`):
+Then delete the test secret with the root token. Open a root shell as in 6a and run (note `secret`, not `secrets`):
 
 ```
 vault kv metadata delete secret/tenants/test/db
@@ -243,7 +245,7 @@ spec:
 ```
 
 - `server` is Vault's in-cluster Service address. Confirm the Service name with `kubectl get svc -n vault`. Never use `127.0.0.1` here either: inside the External Secrets pod that address is the pod itself.
-- This manifest is kept in the monorepo at `argocd/apps/30-workloads/`, so Argo applies it. The External Secrets CRDs must already exist (they come from the External Secrets Application), so the store has to sync after them.
+- This manifest is kept in the monorepo at `argocd/apps/platform/`, so Argo applies it. The External Secrets CRDs must already exist (they come from the External Secrets Application), so the store has to sync after them.
 
 Check that the store is accepted. It should report Valid and Ready, and Vault must be unsealed:
 
@@ -261,7 +263,7 @@ kubectl describe clustersecretstore vault-backend
 
 ## 7. Sync the database password into the app
 
-The app reads its database credentials from a Kubernetes Secret named `db-credentials` in its own namespace, with the keys `username`, `password` and `dbname` (the chart's `secretKeyRef` entries point at exactly that name). Nobody types these values. CloudNativePG generates the password and keeps it in a Secret named `postgres-db-app` in the database namespace (`<service>-db`). Two External Secrets objects carry it to the app, with Vault in between:
+The app reads its database credentials from a Kubernetes Secret named `db-credentials` in its own namespace, with the keys `username`, `password` and `dbname` (the chart's `secretKeyRef` entries point at exactly that name). Nobody types these values. CloudNativePG generates the password and keeps it in a Secret named `postgres-db-app` in the database namespace (`<service>-db`). Two External Secrets objects carry it to the app, with Vault in between. The `PushSecret` is created by the database Composition and the `ExternalSecret` by the shared chart, so a new service gets both without anyone applying them:
 
 ```
 postgres-db-app            (namespace <service>-db, made by CloudNativePG)
@@ -275,11 +277,11 @@ db-credentials             (namespace <service>, read by the app)
 
 CloudNativePG stays the source of truth. If Vault is wiped, for example by a cluster rebuild, the `PushSecret` writes the password back.
 
-Before you start: step 6 is done, Vault is unsealed and `kubectl get clustersecretstore vault-backend` shows Valid.
+For this to work, step 6 must be done, Vault unsealed and `kubectl get clustersecretstore vault-backend` Valid.
 
 ### 7a. The PushSecret (database namespace)
 
-A `PushSecret` reads a Secret from **its own namespace**, so it lives in `<service>-db`, next to `postgres-db-app`. Example for the service `form-test`, with one `match` per key:
+A `PushSecret` reads a Secret from **its own namespace**, so it lives in `<service>-db`, next to `postgres-db-app`. The Composition creates it for each database request. This is the shape, for a service named `form-test`, with one `match` per key; the Composition is the source of truth:
 
 ```yaml
 apiVersion: external-secrets.io/v1alpha1
@@ -294,6 +296,7 @@ spec:
   selector:
     secret:
       name: postgres-db-app
+  deletionPolicy: Delete
   data:
     - match:
         secretKey: password
@@ -316,6 +319,7 @@ spec:
 - `remoteKey` is the path **under the mount** (`tenants/form-test/db`, not `secret/tenants/...`), because the store sets `path: secret`.
 - Each `match` is a separate write, so the first push creates three versions of the Vault secret within milliseconds. That is expected.
 - `apiVersion` is whatever your cluster serves; check with `kubectl get crd pushsecrets.external-secrets.io -o jsonpath='{.spec.versions[*].name}'`.
+- `deletionPolicy: Delete` means removing the `PushSecret` also removes the Vault entry. That needs `delete` in the `eso` policy from 6d.
 - The push needs the `eso` policy from 6d, including `create` and `update` on the **metadata** path. Without them it fails with `403 permission denied` on a `PUT` to `secret/metadata/tenants/...`.
 
 Check it: `kubectl get pushsecrets -n <service>-db` should show `Synced`. If it is `Errored`, `kubectl describe pushsecret db-credentials -n <service>-db` names the failing path or field.
@@ -333,7 +337,7 @@ You should see the three keys merged into one secret, with the database name as 
 
 ### 7c. The ExternalSecret (app namespace)
 
-An `ExternalSecret` creates a Secret in **its own namespace**, so this one lives in `<service>`. This is the shape; your manifest in `vault-and-eso/` is the source of truth:
+An `ExternalSecret` creates a Secret in **its own namespace**, so this one lives in `<service>`. The shared chart creates it (`charts/app/templates/external-secret.yaml`). This is the shape; the chart is the source of truth:
 
 ```yaml
 apiVersion: external-secrets.io/v1
@@ -366,7 +370,7 @@ spec:
 
 - `target.name` must be `db-credentials` with exactly the keys `username`, `password` and `dbname`. Without `target.name`, the Secret takes the `ExternalSecret`'s own name.
 - `refreshInterval` is `15s` in the committed manifest. A short interval made the 5g test quick to read. The `PushSecret` is separate and refreshes hourly by default.
-- If a hand-made Secret of the same name exists, delete it first.
+- If a hand-made Secret named `db-credentials` already exists in the namespace, delete it first.
 - Check: `kubectl get externalsecret -n <service>` shows ready, and `kubectl get secret db-credentials -n <service>` exists.
 
 ### 7d. Prove the app uses it
@@ -381,28 +385,19 @@ curl -s localhost:9000/db
 
 `{"configured":true,"connected":true,...}` from the restarted pod proves the synced Secret works. If the Secret is missing the pod sits in `CreateContainerConfigError`, which is also how you spot a broken sync.
 
-### 7e. Where these manifests live
+### 7e. After a rebuild
 
-For now the `PushSecret` and `ExternalSecret` are kept in `vault-and-eso/` in the monorepo. That is a holding place, not a production design: each new service needs its own pair, so in production they would be generated per service instead of written by hand. How to automate that is an open design question.
+Services and databases come back from Git, and with them the `PushSecret` (from the Composition) and the `ExternalSecret` (from the chart). With Vault initialized, configured and unsealed (steps 5 and 6), the `PushSecret` writes the password from the CloudNativePG Secret back into Vault, and the `ExternalSecret` then creates `db-credentials`. No order is enforced between these pieces. Until `db-credentials` exists, a service pod cannot start: a freshly generated service showed a `secret "db-credentials" not found` event for about 11 seconds and then started on its own.
 
-The files are `vault-and-eso/push-secret-template.yaml` and `vault-and-eso/external-secret-template.yaml`. Despite the name, they are not templates yet: both are written for the service `form-test`, with its name hard-coded. For another service, copy them and change the namespaces and the `tenants/<service>/db` path.
-
-Argo CD does **not** sync `vault-and-eso/` (confirmed: no Application points at it). After a cluster rebuild, apply the pieces in this order: the store is Valid (steps 5 and 6 done), then the `PushSecret` (it repopulates Vault from the CloudNativePG Secret; the `<service>-db` namespace and `postgres-db-app` must already exist), then the `ExternalSecret`:
-
-```
-kubectl apply -f vault-and-eso/push-secret-template.yaml
-kubectl apply -f vault-and-eso/external-secret-template.yaml
-```
-
-Until the credentials Secret exists, a service pod cannot start. I expect it to sit in `CreateContainerConfigError` (not yet observed for a freshly generated service).
+If a `PushSecret` still shows `Errored` after Vault is ready, `kubectl describe pushsecret db-credentials -n <service>-db` names the cause.
 
 ## Where things live
 
 | What | Where |
 |---|---|
 | Platform Applications (pointers only) | `argocd/apps/` |
-| Vault Application (`hashicorp-vault`, chart 0.34.1, namespace `vault`) | `argocd/apps/00-operators/hashicorp-vault.yaml` |
-| External Secrets Application (`external-secrets-operator`, chart 2.12.0, namespace `external-secrets`) | `argocd/apps/00-operators/external-secrets.yaml` |
+| Vault Application (`hashicorp-vault`, chart 0.34.1, namespace `vault`) | `argocd/apps/operators/hashicorp-vault.yaml` |
+| External Secrets Application (`external-secrets-operator`, chart 2.12.0, namespace `external-secrets`) | `argocd/apps/operators/external-secrets.yaml` |
 | Generated services and database requests | `argocd/tenants/<service>/` |
 | Blueprints the form fills in | `self-service/templates/` (never synced by Argo) |
 | Shared Helm chart | `charts/app/` |
@@ -410,19 +405,20 @@ Until the credentials Secret exists, a service pod cannot start. I expect it to 
 | Vault unseal keys and initial root token | `pass` only, never in Git |
 | Vault configuration (KV engine, Kubernetes auth, policy `eso`, role `eso`) | Inside Vault only; redo step 6 after a rebuild |
 | Tenant secrets in Vault | `secret/tenants/<service>/db` |
-| ClusterSecretStore `vault-backend` | `argocd/apps/30-workloads/` |
-| `PushSecret` and `ExternalSecret` per service (interim home; applied by hand, not synced by Argo) | `vault-and-eso/` |
-| Per-service progress and design notes | `docs/progress-notes/` |
+| ClusterSecretStore `vault-backend` | `argocd/apps/platform/` |
+| `PushSecret` per service (created for each database request) | the `PostgresDatabase` Composition in `crossplane/` |
+| `ExternalSecret` per service | `charts/app/templates/external-secret.yaml` |
+| Problems met and how they were solved | `docs/troubleshooting.md` |
 
 ## Cleaning up a test service
 
 Removing a service is a Git change, and Argo CD prunes automatically, so **deleting a service's folder under `argocd/tenants/` deletes its Deployment and, if it has one, its database and the data in it.**
 
-1. Delete `argocd/tenants/<service>/` (keep `argocd/tenants/.gitkeep`; Argo errors on an empty or missing folder), commit and push.
+1. Delete `argocd/tenants/<service>/` (keep `argocd/tenants/.gitkeep` and the `tenants-sentinel` ConfigMap; Argo CD will not prune an Application down to nothing, so the sentinel is the manifest that always remains), commit and push.
 2. Wait for the next Argo poll, then confirm it is gone: `kubectl get applications -n argocd` and `kubectl get postgresdatabase`.
 3. Delete the service's GitHub repository.
 4. Delete its container package separately. A package is not removed with its repository (profile > Packages > the package > Package settings > Danger Zone).
-5. If the service has a secret in Vault, delete it by hand with the root token, since deleting the folder does not touch Vault: `vault kv metadata delete secret/tenants/<service>/db`. Also remove the service's `PushSecret` and `ExternalSecret` manifests from `vault-and-eso/`.
+5. The service's `PushSecret` uses `deletionPolicy: Delete`, so removing the service also removes its Vault entry. Check that it is gone: `vault kv metadata get secret/tenants/<service>/db` should find nothing. If the entry is still there (for example Vault was sealed during the removal), delete it by hand with the root token: `vault kv metadata delete secret/tenants/<service>/db`.
 
 ## Known limits
 
@@ -432,9 +428,9 @@ Removing a service is a Git change, and Argo CD prunes automatically, so **delet
 - Vault is a local approximation of a production deployment. It runs in standalone mode as a single replica, so there is no fault tolerance, and it talks plain HTTP inside the cluster (this version has no TLS).
 - Vault is unsealed by hand. Production would use auto-unseal backed by a cloud KMS or HSM; that is not available on a local, free-tier setup, and a script that holds the unseal keys would defeat the point. After every Vault pod restart or cluster rebuild a person has to unseal it, so the rebuild is not fully hands-off.
 - The unseal keys and root token are held by one person in `pass`. In production the key shares would be split between several people. `pass` encrypts with a GPG key, so back up that key safely: losing it means losing the Vault keys and root token.
-- Vault's configuration is not in Git, so every rebuild means repeating step 6 by hand.
-- All tenants share one External Secrets identity (the role `eso`). That identity can read every tenant's path under `secret/tenants/`, so a service is not limited to reading only its own secret. A per-tenant role and store would fix this, but something would have to create them for each new service; that is left for when the credentials path is automated.
+- Vault's configuration is not in Git, so every rebuild means repeating step 6 by hand. Moving it into the bootstrap scripts is planned for later.
+- All tenants share one External Secrets identity (the role `eso`). That identity can read, write and delete every tenant's path under `secret/tenants/`, so a service is not limited to its own secret. A per-tenant role and store would fix this, but something would have to create them for each new service; that is left for when the credentials path is automated.
 - **Sealed Vault, tested once.** Deleting the Vault pod left Vault sealed with its data intact (it is on a persistent volume). While it was sealed: the already-synced `db-credentials` Secret stayed in place; the running service kept its database connection; a restarted service pod still came up; new `ExternalSecret`s could not sync (`503`); and the `vault-backend` store reported errors, though its status lagged the seal at first. After the unseal, syncing resumed with no action, in about 4 minutes 19 seconds in that one run. So a sealed Vault blocks new services and credential changes, not running ones. Not tested: what a `PushSecret` does while Vault is sealed.
-- The `PushSecret` and `ExternalSecret` are written by hand per service and kept in `vault-and-eso/`. That is an interim holding place, not a production pattern: in production they would be generated for each new service. Automating it is open.
+- Removing a service while Vault is sealed has not been tested.
 - A pod reads its credentials Secret when it starts, so a changed password reaches a running pod only after a restart (believed from standard Kubernetes behavior; not tested here). Nothing restarts pods automatically yet. Whether CloudNativePG ever rotates the password by itself has not been checked.
 - The reserved-name list in the form (`validate` job) is missing `hashicorp-vault`, `external-secrets-operator`, `kube-public` and `kube-node-lease`.
