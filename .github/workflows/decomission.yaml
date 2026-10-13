@@ -17,6 +17,8 @@ jobs:
       CONFIRM: ${{ inputs.confirm }}
       SERVICE: ${{ inputs.service }}
     steps:
+      - name: Validating GH
+        run: which gh
       - name: Validate inputs
         run: |
           if [[ "$SERVICE" != "$CONFIRM" ]]; then
