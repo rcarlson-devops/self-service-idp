@@ -2,7 +2,7 @@
 
 > I built an internal developer platform that lets a developer go from "I need a new service with a database" to a running, observed, deployed application through a single self-service request — no tickets, no waiting on ops.
 
-That is the target. This README separates what is built and measured today from what is still planned. The platform provisions the database and reports it Ready, and the credentials path (the CloudNativePG Secret, Vault, External Secrets, the service's own Secret) is created automatically for every new service: the database's Composition creates the `PushSecret` and the shared chart creates the `ExternalSecret`. I have confirmed this end to end on one freshly generated service. Image scanning, signing, and verification of the signature and SBOM attestation are in place. What is still missing is the rest of the guardrails (policy baseline, network isolation, quotas; Phase 4) and observability (Phase 5).
+That is the target. This README separates what is built and measured today from what is still planned. The platform provisions the database and reports it Ready, and the credentials path (the CloudNativePG Secret, Vault, External Secrets, the service's own Secret) is created automatically for every new service: the database's Composition creates the `PushSecret` and the shared chart creates the `ExternalSecret`. I have confirmed this end to end on one freshly generated service. Image scanning, signing, and verification of the signature and SBOM attestation are in place, and so are network policies and a resource quota for each service and its database (see [Network Isolation and Quotas](#network-isolation-and-quotas)). What is still missing is observability (Phase 5) and a way to remove a service cleanly.
 
 ---
 
@@ -15,7 +15,7 @@ Built in phases; this table is the honest picture of what exists today.
 | 1. Foundation | k3d cluster, Argo CD (app-of-apps), containerized Go service, CI to GHCR, GitOps deploy | **Done** |
 | 2. Self-service infrastructure | Crossplane + CloudNativePG: one `PostgresDatabase` request creates a namespace, team RBAC, and a Postgres cluster | **Done** |
 | 3. Self-service request | GitHub Actions form: one typed request creates the service's own repo from a template and commits its Argo CD Application and database request to `argocd/tenants/`; Argo CD and Crossplane do the rest | **Working end to end** (three runs, each ending in a running service and a Ready database). Input checks and preflight are done; failure handling and a timing summary were postponed (see Known Limitations) |
-| 4. Guardrails | The service's database connection (External Secrets + Vault), image scanning and signing, Kyverno policies, default-deny network policies and quotas | **In progress.** The database credentials path is done: Vault (standalone mode) and External Secrets are installed and configured, and a new service gets its credentials with no manual step (one fresh service tested). I also tested what happens when Vault is sealed. A changed password reaches a running pod only after a restart; that is documented, not automated. Image scanning (Trivy), SBOM generation, keyless cosign signing and Kyverno verification of the signature and the SBOM attestation are done and enforced: an unsigned image is rejected at admission (see [Image Verification](#image-verification)). The policy baseline, network policies and quotas are planned. Problems hit so far: [troubleshooting log](docs/troubleshooting.md) |
+| 4. Guardrails | The service's database connection (External Secrets + Vault), image scanning and signing, Kyverno policies, default-deny network policies and quotas | **In progress.** The database credentials path is done: Vault (standalone mode) and External Secrets are installed and configured, and a new service gets its credentials with no manual step (one fresh service tested). I also tested what happens when Vault is sealed. A changed password reaches a running pod only after a restart; that is documented, not automated. Image scanning (Trivy), SBOM generation, keyless cosign signing and Kyverno verification of the signature and the SBOM attestation are done and enforced: an unsigned image is rejected at admission (see [Image Verification](#image-verification)). Each service namespace has default-deny network policies and a resource quota, and each database namespace has ingress policies; in the tests a pod outside the service could no longer reach the database (see [Network Isolation and Quotas](#network-isolation-and-quotas)). Not built: a way to remove a service cleanly, and egress policy and a quota on the database namespace. Problems hit so far: [troubleshooting log](docs/troubleshooting.md) |
 | 5. Observability | Container-level metrics and a per-service dashboard by default (Prometheus + Grafana) | Planned |
 | 6. Docs and metrics | Architecture diagram, golden path, before/after numbers | Ongoing |
 
@@ -48,17 +48,17 @@ At most organizations, getting a new service into production means filing a tick
 
 ## What This Platform Does
 
-**Target experience (steps 1 to 5 work today; step 6 arrives in Phase 4, step 7 in Phase 5).** A developer fills out one form (a GitHub Actions workflow with typed inputs). That single action:
+**Target experience (steps 1 to 5 work today; step 6 works in part; step 7 arrives in Phase 5).** A developer fills out one form (a GitHub Actions workflow with typed inputs). That single action:
 
 1. Validates the request before it lands
 2. Creates the service's own repository from a template; that repository's CI builds and pushes the first image
 3. Commits the service's Argo CD Application and its database request to `argocd/tenants/`, with no ticket and no human approval step
 4. Provisions the backing infrastructure through Crossplane (namespace, database, RBAC)
 5. Deploys the service via GitOps — no manual `kubectl apply`, ever
-6. Applies security and compliance guardrails automatically (no root containers, required labels, no plaintext secrets)
+6. Applies guardrails automatically: images from the platform's registry must be signed and attested, each service and its database get network policies, the service gets a resource quota, and no plaintext secrets reach Git
 7. Surfaces observability (metrics, dashboards) with zero extra setup
 
-**Working today:** steps 1 to 5. The form validates the request, creates the service's repository from `go-app-template` through the GitHub REST API (with a fine-grained token), waits for that repository's CI to publish the first image, and commits the Application and the database request to `argocd/tenants/`. Argo CD then deploys the service from the shared chart plus the service repo's values file, and Crossplane builds the database, with no `kubectl apply`. This has run end to end four times. **Credentials are automatic too:** the database's Composition creates a `PushSecret` that copies the database password from the CloudNativePG Secret into Vault, and the shared chart creates an `ExternalSecret` that turns it into a `db-credentials` Secret in the service's namespace. On the latest run the service started with no manual step and its `/db` endpoint reported connected. Its pod could not start for about 29 s while it waited for that Secret. **Image verification works too** (see [Image Verification](#image-verification)). **Not working yet:** the rest of the guardrails (policy baseline, network isolation, quotas; Phase 4) and the metrics (Phase 5). Behind the form, the database request is one small manifest:
+**Working today:** steps 1 to 5. The form validates the request, creates the service's repository from `go-app-template` through the GitHub REST API (with a fine-grained token), waits for that repository's CI to publish the first image, and commits the Application and the database request to `argocd/tenants/`. Argo CD then deploys the service from the shared chart plus the service repo's values file, and Crossplane builds the database, with no `kubectl apply`. This has run end to end four times. **Credentials are automatic too:** the database's Composition creates a `PushSecret` that copies the database password from the CloudNativePG Secret into Vault, and the shared chart creates an `ExternalSecret` that turns it into a `db-credentials` Secret in the service's namespace. On the latest run the service started with no manual step and its `/db` endpoint reported connected. Its pod could not start for about 29 s while it waited for that Secret. **Image verification works too** (see [Image Verification](#image-verification)). **Network isolation and a quota work too** (see [Network Isolation and Quotas](#network-isolation-and-quotas)). **Not working yet:** removing a service cleanly, and the metrics (Phase 5). Behind the form, the database request is one small manifest:
 
 ```yaml
 apiVersion: rcarlsondevops.org/v1alpha1
@@ -97,6 +97,7 @@ flowchart LR
     CP --> NS[Namespace]
     CP --> DB[CNPG Cluster]
     CP --> RB[RoleBinding]
+    CP --> DNP[Ingress NetworkPolicies on the database namespace]
     CNPG -.->|runs| DB
     DB -.->|postgres-db-app Secret| PS[PushSecret, from the Composition]
     PS -.-> Vault[(Vault, standalone)]
@@ -104,6 +105,7 @@ flowchart LR
     ES -.->|db-credentials Secret| Dep
     CP --> PS
     App --> ES
+    App --> NP[NetworkPolicies and ResourceQuota, from the chart]
     Argo --> Kyv[Kyverno]
     Argo --> Pol[kyverno-policies Application, wave 1]
     Pol --> IVP[ImageValidatingPolicy image-check]
@@ -125,8 +127,9 @@ flowchart LR
 | Supply chain | Trivy (scans, CycloneDX SBOM), cosign (keyless signing and SBOM attestation) | In use | Every image is scanned, signed and attested in its own repo's CI |
 | Tenant discovery | One recursive Argo CD Application (sync wave 3) on `argocd/tenants/` | In use | One folder per service; picks up generated Applications and database requests, after the database API is installed |
 | Self-service front door | GitHub Actions (`workflow_dispatch` form) | In use | One typed form as the single entry point; no extra tooling to host |
-| Policy as code | Kyverno v1.19.1 | In use for image verification (`ImageValidatingPolicy`); policy baseline in Phase 4 | Guardrails enforced automatically, not reviewed manually |
+| Policy as code | Kyverno v1.19.1 | In use for image verification (`ImageValidatingPolicy`) | Guardrails enforced automatically, not reviewed manually |
 | Secrets | External Secrets Operator (chart 2.12.0) + HashiCorp Vault (chart 0.34.1, standalone mode) | In use; created automatically for each service | No plaintext secrets ever committed to Git; Git holds only references. Standalone rather than dev mode on purpose: I wanted it as close to a production deployment as a local cluster allows, so it has to be initialized and unsealed by hand |
+| Network isolation and quotas | Kubernetes NetworkPolicy and ResourceQuota | In use; created automatically for each service | Each service namespace is closed by default and opened one flow at a time; the database namespace accepts connections only from its service, its own instances and the database operator. Enforcement was observed on the local cluster |
 | Observability | Prometheus + Grafana | Phase 5 | Metrics available by default for anything deployed through the platform |
 
 ## Design Decisions Worth Knowing
@@ -140,6 +143,7 @@ flowchart LR
 - **Git records what is deployed.** Each service's CI pushes a `sha-<short>` image tag and commits the tag and the image digest to its own `environments/dev/values-dev.yaml`; CI never touches the cluster. By design, the platform repo holds only the Application that points at the service repo, so a new image never needs a commit to the platform repo. I confirmed this on the cluster with a hand-built service: the Deployment's image came from the service repo's values file.
 - **One repository per service.** The platform repo is the control plane (shared chart, Argo CD configuration, Crossplane API, generated Applications); service source lives in repos generated from the template. If a service team would own and change a file, it belongs in the template; if the platform owns it, it stays here.
 - **One Application per service, two sources.** The generated Application combines the shared chart from this repo with the service repo's values file. The Application name, Helm release name, service name and namespace are the same string, so object names and selectors line up.
+- **The team name also becomes a pod label.** The form passes `team` to the service's Application as a Helm parameter, `extraLabels.team`, and the shared chart adds it to the pod labels next to `cost-center`. I checked this on a service whose name and team differ. The chart builds its selectors from separate labels, so an extra label cannot change what a Deployment or Service selects.
 - **One folder per service, watched by one recursive Application.** `argocd/tenants/<service>/` holds the service's Application and, optionally, a `PostgresDatabase` request. The watching Application runs at sync wave 3 so the database API exists before any request is applied. A request committed there reached Ready while that Application stayed Healthy.
 - **Blueprints are valid YAML with blank values, not placeholders.** The form fills them with `yq` by path and fails the run if any blank is left; plain `envsubst` would also blank Argo CD's `$values` reference. The fill and the check were tested on a copy first, and the form has since run end to end.
 - **Every service gets a database.** The form no longer asks whether one is needed; the database request is the heart of what the platform provides.
@@ -161,6 +165,37 @@ Error from server: admission webhook "ivpol.validate.kyverno.svc-fail" denied th
 
 A new service generated by the form started with the policy in Deny. The limits of this check are listed under [Known Limitations](#known-limitations).
 
+## Network Isolation and Quotas
+
+Service namespaces and database namespaces are closed by default and opened one flow at a time. The service side comes from the shared chart, so Argo CD applies it with the service. The database side comes from the database Composition, so Crossplane applies it with the database. Neither needs a step in the form.
+
+**Service namespace (from the chart):**
+
+| Object | Effect |
+|---|---|
+| `default-deny` | Selects every pod in the namespace and blocks outgoing traffic that no other policy allows. Incoming traffic was not tested |
+| `allow-dns` | Lets the pods resolve names |
+| `allow-psql` | Lets the pods open port 5432 to the service's own database namespace, `<service>-db`, and nowhere else |
+| `resource-quota` | Caps the namespace at 4 pods, 200m and 128Mi of requests, and 800m and 256Mi of limits |
+
+**Database namespace (from the Composition):**
+
+| Object | Effect |
+|---|---|
+| `default-deny` | Blocks incoming traffic that no other policy allows |
+| `allow-service` | Port 5432 from the service's namespace |
+| `allow-inter-namespace` | Ports 5432 and 8000 from the database namespace itself, for traffic between instances |
+| `allow-cnpg` | Port 8000 from the CloudNativePG operator's namespace |
+
+What I tested, each blocked case against a control that has to work:
+
+- From a service namespace, a pod could not reach the Kubernetes API, which a pod in a namespace without policies could. The service's `/db` endpoint still reported connected.
+- Against the database, a pod in the `default` namespace and a pod in another service's namespace could not connect to port 5432. The service's own namespace could.
+- A pod with no requests and limits was rejected with an error naming the quota. A rolling restart of the service fit under the quota.
+- A new service with two database instances, created after all of this, reached two of two healthy instances.
+
+The limits of this setup are listed under [Known Limitations](#known-limitations).
+
 ## Tradeoffs: What I Chose, What I Gave Up
 
 Each choice below has an alternative and a price. The price is the part worth reading.
@@ -174,6 +209,8 @@ Each choice below has an alternative and a price. The price is the part worth re
 | A fine-grained personal access token for repository creation | A GitHub App with short-lived tokens | Simple to set up, but tied to one person and broader than I would accept at scale. I have not checked whether a GitHub App can create repositories on a personal account |
 | Keyless cosign signing (GitHub OIDC identity, public Sigstore) | Signing with a key I manage | Verification depends on public Sigstore being reachable from the cluster (it works from this one). The identity check is a pattern that accepts any repository under the account |
 | Image verification that fails closed (`failurePolicy: Fail`) | Letting pods through when Kyverno is unreachable | While Kyverno is down, creating pods is rejected in every namespace except `kyverno` and `kube-system`. The outage case is untested |
+| Network policies and a quota in the shared chart, and ingress policies in the Composition | Leaving namespaces open, or writing the policies by hand for each service | Each new flow needs an explicit allow rule; a reachable URL and metrics scraping will each need one. A mistake in the chart reaches every service on the next sync |
+| Ingress-only policies on the database namespace, with no quota there | Also restricting the database pods' outgoing traffic and capping the namespace | Outgoing traffic from the database pods is unrestricted and nothing caps that namespace. The database pod declares no CPU or memory requests, so a quota there would need defaults added first |
 | A local 3-node k3d cluster | A managed cluster such as EKS | No cloud cost and a fully reproducible rebuild. The Kubernetes API is the same, but there is no real cloud IAM, load balancer or managed storage, and I make no production claims |
 
 **What it costs to run:** nothing in cloud spend, since everything runs on one laptop. I have not yet measured the laptop's memory and CPU use with every component running.
@@ -191,7 +228,7 @@ _Measured on a local cluster: 281 s from submitting the form to a Ready service 
 
 ## What's Next at Scale
 
-- **Multi-tenancy:** namespace-per-team isolation with resource quotas, rather than a shared flat cluster
+- **Multi-tenancy:** the service and database namespaces have network policies and the service namespace has a quota. Still open: egress policy and a quota on the database namespace, policies on the platform namespaces, and Argo CD project limits per team
 - **Cost tracking:** tag-based cost attribution surfaced back to teams (for example in Grafana) so they see what their infra costs
 - **More service types:** expand beyond one service type to cover common patterns (worker/queue consumer, scheduled job, static site)
 - **Self-service beyond day 1:** scaling, rollback, and decommissioning through the same self-service workflow, not just creation
@@ -216,10 +253,10 @@ _Measured on a local cluster: 281 s from submitting the form to a Ready service 
 │   │   └── workloads/       The Application that watches argocd/tenants/
 │   └── tenants/             One folder per service: its Application and its database request
 ├── bootstrap/               bootstrap.sh, k3d config, pinned Argo CD install
-├── charts/app/              Shared Helm chart used by every service
+├── charts/app/              Shared Helm chart used by every service, including its network policies and quota
 ├── crossplane/
 │   ├── functions/           The three Crossplane Function packages
-│   └── api/                 Crossplane RBAC; database/ holds the XRD and Composition
+│   └── api/                 Crossplane RBAC; database/ holds the XRD and Composition (which also creates the database namespace's network policies)
 ├── self-service/
 │   └── templates/           Application and database blueprints the form fills in (not synced by Argo CD)
 ├── kyverno-policies/        The ImageValidatingPolicy, synced by the kyverno-policies Application
@@ -309,7 +346,10 @@ Rolling that image out is done by an Application in `argocd/tenants/` that combi
 - The CI bot commits directly to `main` in each service repo, which would not work with branch protection.
 - The service's `/db` endpoint is unauthenticated and opens a new database connection on every call. That is acceptable on a local cluster and is not something to expose. I have not set `sslmode` in the connection URL; I believe the driver tries TLS and falls back to plain without verifying the certificate, but I have not checked which one is used here, so treat database connections as unencrypted.
 - Database volumes cannot be resized (the local storage class disallows expansion), and deleting a request deletes its data.
-- One guardrail is built so far: image verification, covering the signature and the SBOM attestation (see Image Verification). The policy baseline, network isolation and quotas are not built (Phase 4). Secrets management covers the database password only: it reaches each service through Vault and External Secrets with nothing in Git, but every service shares one Vault role that can read every service's path under `tenants/`, and the password also still sits in the Secret CloudNativePG generates, which is where Vault's copy comes from.
+- Two guardrails are built: image verification, covering the signature and the SBOM attestation (see Image Verification), and network isolation with a quota (see Network Isolation and Quotas). Kyverno enforces only the image check. Secrets management covers the database password only: it reaches each service through Vault and External Secrets with nothing in Git, but every service shares one Vault role that can read every service's path under `tenants/`, and the password also still sits in the Secret CloudNativePG generates, which is where Vault's copy comes from.
+- Network isolation covers the service and database namespaces only. The platform's own namespaces (Argo CD, Vault, External Secrets, Crossplane, CloudNativePG, Kyverno) have no policies. In the database namespace only incoming traffic is restricted: outgoing traffic from the database pods is not, and the namespace has no quota or default resource requests, because the database pod declares none. In the service namespace the incoming side was not tested, since nothing sends traffic to the services yet; a reachable URL and metrics scraping will each need an allow rule.
+- The quota is the same for every service: 4 pods, 200m and 128Mi of requests, 800m and 256Mi of limits. A pod that declares no requests and limits is rejected, so the chart has to set them. A service that needs more has to change the shared chart, which changes every service.
+- The network policies and the quota come from the shared chart, so they reach a service on the next sync. A service created before they existed received them the same way.
 - Image verification accepts a signature and attestation from any repository under the `rcarlson-devops` account: the policy matches the signing workflow's identity with a pattern, so any workflow on `main` in any of them can produce an image that passes.
 - Only images under `ghcr.io/rcarlson-devops/` are checked. Images from other registries are not verified.
 - The image policy's webhook fails closed. If Kyverno cannot be reached, creating pods is rejected in every namespace except `kyverno` and `kube-system`, which includes the platform's own namespaces. Kyverno's namespace is excluded so it can restart itself. This case has not been tested.
