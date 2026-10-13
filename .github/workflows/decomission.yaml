@@ -88,7 +88,7 @@ jobs:
         run: |
           if gh repo view "rcarlson-devops/${SERVICE}" --json name > /dev/null 2>&1; then
             gh repo delete "rcarlson-devops/${SERVICE}" --yes
-            echo "Delete Github Repo: rcarlson-devops/${SERVICE}" >> $GITHUB_STEP_SUMMARY
+            echo "Deleted Github Repo: rcarlson-devops/${SERVICE}" >> $GITHUB_STEP_SUMMARY
           else
             echo "Skipped Repo deletion. Repo not present" >> $GITHUB_STEP_SUMMARY    
           fi
@@ -96,7 +96,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
+      GH_TOKEN: ${{ secrets.PKG_DELETE_PAT }}
       SERVICE: ${{ inputs.service }}
     steps:
       - name: Delete GHCR Package
