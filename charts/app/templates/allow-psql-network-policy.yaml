@@ -10,6 +10,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: "{{ .Release.Name }}-db"
-    - ports:
+      ports:
         - port: 5432
           protocol: "TCP"
