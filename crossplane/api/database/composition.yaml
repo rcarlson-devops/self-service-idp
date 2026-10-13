@@ -171,6 +171,7 @@ spec:
               annotations:
                 gotemplating.fn.crossplane.io/composition-resource-name: pushsecret
             spec:
+              deletionPolicy: Delete
               secretStoreRefs:
                 - name: vault-backend
                   kind: ClusterSecretStore
