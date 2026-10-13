@@ -15,8 +15,7 @@ spec:
       helm:
         valueFiles:
           - $values/environments/dev/values-dev.yaml
-        parameters:
-          - extraLabels.team
+        parameters: []
     - repoURL:
       targetRevision: main
       ref: values
