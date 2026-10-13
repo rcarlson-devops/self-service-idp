@@ -17,7 +17,7 @@ jobs:
       group: repo-group
     env:
       CONFIRM: ${{ inputs.confirm }}
-      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT}}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SERVICE: ${{ inputs.service }}
     steps:
       - name: Validate inputs
@@ -52,3 +52,43 @@ jobs:
             echo "WARN: Tenant ${SERVICE} not present" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "Validate Step Succeeded" >> "$GITHUB_STEP_SUMMARY"
+  delete_tenant_items:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SERVICE: ${{ inputs.service }}
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v7
+      - name: Delete items and commit/push
+        run: |
+          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp &> /dev/null; then
+            rm -rf "argocd/tenants/${SERVICE}"
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "Remove argocd/tenants/${SERVICE}"
+            git pull --rebase
+            git push origin HEAD:main
+            echo "Removed argocd/tenants/${SERVICE}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Skipping tenant deletion as it is not present" >> $GITHUB_STEP_SUMMARY
+          fi
+  delete_github_repo:
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
+      SERVICE: ${{ inputs.service }}
+    steps:
+      - name: Delete Repo
+        run: |
+          if gh repo view "rcarlson-devops/${SERVICE}" --json name > /dev/null 2>&1; then
+            gh repo delete "rcarlson-devops/${SERVICE}" --yes
+            echo "Delete Github Repo: rcarlson-devops/${SERVICE}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Skipped Repo deletion. Repo not present" >> $GITHUB_STEP_SUMMARY    
+          fi
