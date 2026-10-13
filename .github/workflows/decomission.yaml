@@ -13,6 +13,8 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    concurrency:
+      group: repo-group
     env:
       CONFIRM: ${{ inputs.confirm }}
       GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT}}
