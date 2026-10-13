@@ -66,8 +66,8 @@ jobs:
             argocd|kube-system|default|crossplane-system|cnpg-system|\
             cloudnativepg-operator|crossplane-functions|crossplane-operator|\
             database-api|self-service-idp-root|self-service-idp-tenants|*-db|vault|external-secrets)
-              echo "Error: '$TEAM' is a reserved name. Choose another."
-              echo "Error: '$TEAM' is a reserved name. Choose another." >> "$GITHUB_STEP_SUMMARY"
+              echo "Error: '$SERVICE' is a reserved name. Choose another."
+              echo "Error: '$SERVICE' is a reserved name. Choose another." >> "$GITHUB_STEP_SUMMARY"
               exit 1
               ;;
           esac
@@ -148,11 +148,11 @@ jobs:
           yq -i '(.metadata.name) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/application.yaml"
           yq -i '(.spec.sources[] | select(.ref == "values")).repoURL = "https://github.com/rcarlson-devops/" + strenv(SERVICE) + ".git"' "./argocd/tenants/${SERVICE}/application.yaml"
           yq -i '(.spec.destination.namespace) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/application.yaml"
-          yq -i '(.spec.sources[] | select(.path == "charts/app")).helm.parmeters[0].value = strenv(TEAM)' "./argocd/tenants/${SERVICE}/application.yaml"
+          yq -i '(.spec.sources[] | select(.path == "charts/app")).helm.parameters += [{"name": "extraLabels.team", "value": strenv(TEAM)}]' "./argocd/tenants/${SERVICE}/application.yaml"
       - name: Replace placeholders in database.yaml
         run: |
           yq -i '(.metadata.name) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/database.yaml"
-          yq -i '(.spec.team) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/database.yaml"
+          yq -i '(.spec.team) = strenv(TEAM)' "./argocd/tenants/${SERVICE}/database.yaml"
           yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${SERVICE}/database.yaml"
           yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${SERVICE}/database.yaml"
       - name: Check for failed yq
