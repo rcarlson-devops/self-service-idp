@@ -92,3 +92,18 @@ jobs:
           else
             echo "Skipped Repo deletion. Repo not present" >> $GITHUB_STEP_SUMMARY    
           fi
+  delete_ghcr_package:
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
+      SERVICE: ${{ inputs.service }}
+    steps:
+      - name: Delete GHCR Package
+        run: |
+          if gh api "/user/packages/container/${SERVICE}" > /dev/null 2>&1; then
+            gh api -X DELETE "/user/packages/container/${SERVICE}"
+            echo "Deleted /user/packages/container/${SERVICE}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Skipping package deletion. It does not exist" >> $GITHUB_STEP_SUMMARY
+          fi
