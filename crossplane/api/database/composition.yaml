@@ -75,17 +75,17 @@ spec:
                 - match:
                     secretKey: password
                     remoteRef:
-                      remoteKey: "tenants/{{ .observed.composite.resource.spec.team }}/db"
+                      remoteKey: "tenants/{{ .observed.composite.resource.metadata.name }}/db"
                       property: password
                 - match:
                     secretKey: username
                     remoteRef:
-                      remoteKey: "tenants/{{ .observed.composite.resource.spec.team }}/db"
+                      remoteKey: "tenants/{{ .observed.composite.resource.metadata.name }}/db"
                       property: username
                 - match:
                     secretKey: dbname
                     remoteRef:
-                      remoteKey: "tenants/{{ .observed.composite.resource.spec.team }}/db"
+                      remoteKey: "tenants/{{ .observed.composite.resource.metadata.name }}/db"
                       property: dbname
     - step: create-cluster-rolebinding
       functionRef:

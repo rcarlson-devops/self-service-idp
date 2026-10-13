@@ -3,7 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       team:
-        description: 'The team name which will be used to name all resources deployed'
+        description: 'The team name responsible for the new service'
+        required: true
+        type: string
+      service:
+        description: 'The name of the service being deployed'
         required: true
         type: string
       instances:
@@ -28,11 +32,17 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT}}
       INSTANCES: ${{ inputs.instances }}
+      SERVICE: ${{ inputs.service }}
       SIZE: ${{ inputs.size }}
       TEAM: ${{ inputs.team }}
     steps:
       - name: Validate inputs
         run: |
+          if [[ ! "$SERVICE" =~ ^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$ ]]; then
+            echo "Error: Service name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen."
+            echo "Error: Service name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           if [[ ! "$TEAM" =~ ^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$ ]]; then
             echo "Error: Team name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen."
             echo "Error: Team name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen." >> "$GITHUB_STEP_SUMMARY"
@@ -49,6 +59,10 @@ jobs:
             exit 1
           fi
           case "$TEAM" in
+            dev-team-?*) ;;
+            *) echo "Error: team must start with dev-team-"; exit 1 ;;
+          esac
+          case "$SERVICE" in
             argocd|kube-system|default|crossplane-system|cnpg-system|\
             cloudnativepg-operator|crossplane-functions|crossplane-operator|\
             database-api|self-service-idp-root|self-service-idp-tenants|*-db|vault|external-secrets)
@@ -57,14 +71,14 @@ jobs:
               exit 1
               ;;
           esac
-          if gh repo view "rcarlson-devops/${TEAM}" --json name > /dev/null 2>&1; then
-            echo "rcarlson-devops/${TEAM} already exists"
-            echo "rcarlson-devops/${TEAM} already exists" >> "$GITHUB_STEP_SUMMARY"
+          if gh repo view "rcarlson-devops/${SERVICE}" --json name > /dev/null 2>&1; then
+            echo "rcarlson-devops/${SERVICE} already exists"
+            echo "rcarlson-devops/${SERVICE} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          if gh repo read-dir "argocd/tenants/${TEAM}" --repo rcarlson-devops/self-service-idp &> /dev/null; then
-            echo "Tenant ${TEAM} already exists"
-            echo "Tenant ${TEAM} already exists" >> "$GITHUB_STEP_SUMMARY"
+          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp &> /dev/null; then
+            echo "Tenant ${SERVICE} already exists"
+            echo "Tenant ${SERVICE} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi         
           echo "Validate Step Succeeded" >> "$GITHUB_STEP_SUMMARY"
@@ -73,7 +87,7 @@ jobs:
     needs: validate
     env:
       GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
-      TEAM: ${{ inputs.team }}
+      SERVICE: ${{ inputs.service }}
     steps:
       - name: deploy
         run: |
@@ -82,9 +96,9 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-Github-Api-Version: 2026-03-10" \
             "/repos/rcarlson-devops/go-app-template/generate" \
-            -f name="${TEAM}" \
+            -f name="${SERVICE}" \
             -F private=false
-          echo "rcarlson-devops/${TEAM} created" >> "$GITHUB_STEP_SUMMARY"
+          echo "rcarlson-devops/${SERVICE} created" >> "$GITHUB_STEP_SUMMARY"
   populate_tenants:
     runs-on: ubuntu-latest
     needs: deploy_new_repo
@@ -95,6 +109,7 @@ jobs:
     env:
       TEAM: ${{ inputs.team }}
       INSTANCES: ${{ inputs.instances }}
+      SERVICE: ${{ inputs.service }}
       SIZE: ${{ inputs.size }}
     steps:
       - name: Poll new repo for commit
@@ -103,7 +118,7 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
           OUTPUT_PATH: "values-dev.yaml"
           POLL_INTERVAL: 10
-          REPO: "rcarlson-devops/${{ inputs.team }}"
+          REPO: "rcarlson-devops/${{ inputs.service }}"
         timeout-minutes: 5
         run: |
           gh --version
@@ -122,27 +137,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
       - name: Create new tenants directory
-        run: mkdir "./argocd/tenants/${TEAM}" 
+        run: mkdir "./argocd/tenants/${SERVICE}" 
       - name: Copy application.yaml.tmpl to tenants
-        run: cp "./self-service/templates/application.yaml.tmpl" "./argocd/tenants/${TEAM}/application.yaml"
+        run: cp "./self-service/templates/application.yaml.tmpl" "./argocd/tenants/${SERVICE}/application.yaml"
       - name: Copy database.yaml.tmpl to tenants
-        run: cp ./self-service/templates/database.yaml.tmpl "./argocd/tenants/${TEAM}/database.yaml"
+        run: cp ./self-service/templates/database.yaml.tmpl "./argocd/tenants/${SERVICE}/database.yaml"
       - name: Replace placeholders in application.yaml
         run: |
           yq --version
-          yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
-          yq -i '(.spec.sources[] | select(.ref == "values")).repoURL = "https://github.com/rcarlson-devops/" + strenv(TEAM) + ".git"' "./argocd/tenants/${TEAM}/application.yaml"
-          yq -i '(.spec.destination.namespace) = strenv(TEAM)' "./argocd/tenants/${TEAM}/application.yaml"
+          yq -i '(.metadata.name) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/application.yaml"
+          yq -i '(.spec.sources[] | select(.ref == "values")).repoURL = "https://github.com/rcarlson-devops/" + strenv(SERVICE) + ".git"' "./argocd/tenants/${SERVICE}/application.yaml"
+          yq -i '(.spec.destination.namespace) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/application.yaml"
+          yq -i '(.spec.sources[] | select(.path == "charts/app")).helm.parmeters[0].value = strenv(TEAM)' "./argocd/tenants/${SERVICE}/application.yaml"
       - name: Replace placeholders in database.yaml
         run: |
-          yq -i '(.metadata.name) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
-          yq -i '(.spec.team) = strenv(TEAM)' "./argocd/tenants/${TEAM}/database.yaml"
-          yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${TEAM}/database.yaml"
-          yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${TEAM}/database.yaml"
+          yq -i '(.metadata.name) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/database.yaml"
+          yq -i '(.spec.team) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/database.yaml"
+          yq -i '(.spec.instances) = (strenv(INSTANCES) | tonumber)' "./argocd/tenants/${SERVICE}/database.yaml"
+          yq -i '(.spec.size) = strenv(SIZE)' "./argocd/tenants/${SERVICE}/database.yaml"
       - name: Check for failed yq
         run: |
           for f in application database; do
-            BLANKS=$(yq '.. | select(tag == "!!null") | path | join(".")' "./argocd/tenants/${TEAM}/${f}.yaml")
+            BLANKS=$(yq '.. | select(tag == "!!null") | path | join(".")' "./argocd/tenants/${SERVICE}/${f}.yaml")
             if [ -n "$BLANKS" ]; then
               echo "Unfilled fields in ${f}.yaml:"
               echo "$BLANKS"
@@ -153,8 +169,8 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add "./argocd/tenants/${TEAM}/application.yaml" "./argocd/tenants/${TEAM}/database.yaml"
-          git commit -m "Add application and database manifests for team ${TEAM}"
+          git add "./argocd/tenants/${SERVICE}/application.yaml" "./argocd/tenants/${SERVICE}/database.yaml"
+          git commit -m "Add application and database manifests for service ${SERVICE}"
           git pull --rebase
           git push origin HEAD:main
-          echo "**argocd/tenants/${TEAM}/application.yaml and database.yaml committed and pushed" >> "$GITHUB_STEP_SUMMARY"
+          echo "**argocd/tenants/${SERVICE}/application.yaml and database.yaml committed and pushed" >> "$GITHUB_STEP_SUMMARY"
