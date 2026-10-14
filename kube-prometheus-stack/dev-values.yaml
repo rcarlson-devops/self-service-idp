@@ -1,13 +1,16 @@
-alertManager:
+alertmanager:
   enabled: false
 grafana:
   enabled: true
   defaultDashboardsEnabled: false
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 1Gi
 prometheus:
   prometheusSpec:
     retention: 6h
-    retentionSize: "4GiB"
-    serviceMonitorSelectorNilUsesHelixFeatures: false
+    retentionSize: "3GiB"
     serviceMonitorSelector:
       matchLabels:
         release: kube-prometheus-stack

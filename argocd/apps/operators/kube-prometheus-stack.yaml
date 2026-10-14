@@ -7,25 +7,23 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: https://prometheus-community.github.io/helm-charts
+    - chart: kube-prometheus-stack
+      repoURL: https://prometheus-community.github.io/helm-charts
       targetRevision: 92.3.1
-      path: charts/app
       helm:
         releaseName: kube-prometheus-stack
         valueFiles:
           - $values/kube-prometheus-stack/dev-values.yaml
-        parameters:
-          - name: extraLabels.team
-            value: dev-team-test
     - repoURL: https://github.com/rcarlson-devops/self-service-idp.git
       targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
-    namespace: dev-env
+    namespace: monitoring
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
