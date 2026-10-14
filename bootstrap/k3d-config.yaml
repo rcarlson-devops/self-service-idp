@@ -21,3 +21,6 @@ ports:
   - port: 127.0.0.1:8080:8888
     nodeFilters:
       - loadbalancer
+  - port: 127.0.0.1:8081:80
+    nodeFilters:
+      - loadbalancer
