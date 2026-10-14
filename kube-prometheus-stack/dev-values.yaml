@@ -1,0 +1,20 @@
+alertManager:
+  enabled: false
+grafana:
+  enabled: true
+  defaultDashboardsEnabled: false
+prometheus:
+  prometheusSpec:
+    retention: 6h
+    retentionSize: "4GiB"
+    serviceMonitorSelectorNilUsesHelixFeatures: false
+    serviceMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
