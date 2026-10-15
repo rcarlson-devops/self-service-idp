@@ -2,7 +2,7 @@
 
 > I built an internal developer platform that lets a developer go from "I need a new service with a database" to a running, observed, deployed application through a single self-service request — no tickets, no waiting on ops.
 
-That is the target. This README separates what is built and measured today from what is still planned. The platform provisions the database and reports it Ready, and the credentials path (the CloudNativePG Secret, Vault, External Secrets, the service's own Secret) is created automatically for every new service: the database's Composition creates the `PushSecret` and the shared chart creates the `ExternalSecret`. I have confirmed this end to end on one freshly generated service. Image scanning, signing, and verification of the signature and SBOM attestation are in place, and so are network policies and a resource quota for each service and its database (see [Network Isolation and Quotas](#network-isolation-and-quotas)). A `decommission` workflow removes a service and what the form created for it (see [Decommissioning a Service](#decommissioning-a-service)). A running service is reachable from the machine that runs the cluster over plain HTTP at `<service>.localhost:8081` (see [Reaching a Service](#reaching-a-service)). What is still missing is observability (Phase 5).
+That is the target. This README separates what is built and measured today from what is still planned. The platform provisions the database and reports it Ready, and the credentials path (the CloudNativePG Secret, Vault, External Secrets, the service's own Secret) is created automatically for every new service: the database's Composition creates the `PushSecret` and the shared chart creates the `ExternalSecret`. I have confirmed this end to end on one freshly generated service. Image scanning, signing, and verification of the signature and SBOM attestation are in place, and so are network policies and a resource quota for each service and its database (see [Network Isolation and Quotas](#network-isolation-and-quotas)). A `decommission` workflow removes a service and what the form created for it (see [Decommissioning a Service](#decommissioning-a-service)). A running service is reachable from the machine that runs the cluster over plain HTTP at `<service>.localhost:8081` (see [Reaching a Service](#reaching-a-service)). Prometheus and Grafana run in the `monitoring` namespace, and one dashboard shows a service's memory, CPU and restarts (see [Observability](#observability)). It has been checked on one service. What is still missing is Phase 6: the architecture diagram, the demo and the final numbers.
 
 ---
 
@@ -16,7 +16,7 @@ Built in phases; this table is the honest picture of what exists today.
 | 2. Self-service infrastructure | Crossplane + CloudNativePG: one `PostgresDatabase` request creates a namespace, team RBAC, and a Postgres cluster | **Done** |
 | 3. Self-service request | GitHub Actions form: one typed request creates the service's own repo from a template and commits its Argo CD Application and database request to `argocd/tenants/`; Argo CD and Crossplane do the rest | **Working end to end** (three runs, each ending in a running service and a Ready database). Input checks and preflight are done; failure handling and a timing summary were postponed (see Known Limitations) |
 | 4. Guardrails | The service's database connection (External Secrets + Vault), image scanning and signing, Kyverno policies, default-deny network policies and quotas | **In progress.** The database credentials path is done: Vault (standalone mode) and External Secrets are installed and configured, and a new service gets its credentials with no manual step (one fresh service tested). I also tested what happens when Vault is sealed. A changed password reaches a running pod only after a restart; that is documented, not automated. Image scanning (Trivy), SBOM generation, keyless cosign signing and Kyverno verification of the signature and the SBOM attestation are done and enforced: an unsigned image is rejected at admission (see [Image Verification](#image-verification)). Each service namespace has default-deny network policies and a resource quota, and each database namespace has ingress policies; in the tests a pod outside the service could no longer reach the database (see [Network Isolation and Quotas](#network-isolation-and-quotas)). The shared chart also gives each service an Ingress and a network policy that lets Traefik reach it, so it answers at `http://<service>.localhost:8081` (see [Reaching a Service](#reaching-a-service)). A `decommission` workflow removes a service, its repository, its image package, its tenant folder and its Vault entry (see [Decommissioning a Service](#decommissioning-a-service)). Not built: egress policy and a quota on the database namespace. Problems hit so far: [troubleshooting log](docs/troubleshooting.md) |
-| 5. Observability | Container-level metrics and a per-service dashboard by default (Prometheus + Grafana) | Planned |
+| 5. Observability | Container-level metrics and a per-service dashboard by default (Prometheus + Grafana) | **Working, checked on one service.** Prometheus and Grafana are installed with Alertmanager off. The kubelet on each node is scraped, so container metrics exist for every namespace. One dashboard, Service Resources, shows memory, CPU and restarts per pod for the namespace chosen in a drop-down, and it loads from a ConfigMap in Git. Prometheus data is not stored on a volume (see [Observability](#observability)) |
 | 6. Docs and metrics | Architecture diagram, golden path, before/after numbers | Ongoing |
 
 **Measured so far** (local 3-node k3d cluster):
@@ -48,7 +48,7 @@ At most organizations, getting a new service into production means filing a tick
 
 ## What This Platform Does
 
-**Target experience (steps 1 to 5 work today; step 6 works in part; step 7 arrives in Phase 5).** A developer fills out one form (a GitHub Actions workflow with typed inputs). That single action:
+**Target experience (steps 1 to 5 work today; step 6 works in part; step 7 works in part, see [Observability](#observability)).** A developer fills out one form (a GitHub Actions workflow with typed inputs). That single action:
 
 1. Validates the request before it lands
 2. Creates the service's own repository from a template; that repository's CI builds and pushes the first image
@@ -58,7 +58,7 @@ At most organizations, getting a new service into production means filing a tick
 6. Applies guardrails automatically: images from the platform's registry must be signed and attested, each service and its database get network policies, the service gets a resource quota, and no plaintext secrets reach Git
 7. Surfaces observability (metrics, dashboards) with zero extra setup
 
-**Working today:** steps 1 to 5. The form validates the request, creates the service's repository from `go-app-template` through the GitHub REST API (with a fine-grained token), waits for that repository's CI to publish the first image, and commits the Application and the database request to `argocd/tenants/`. Argo CD then deploys the service from the shared chart plus the service repo's values file, and Crossplane builds the database, with no `kubectl apply`. This has run end to end four times. **Credentials are automatic too:** the database's Composition creates a `PushSecret` that copies the database password from the CloudNativePG Secret into Vault, and the shared chart creates an `ExternalSecret` that turns it into a `db-credentials` Secret in the service's namespace. On the latest run the service started with no manual step and its `/db` endpoint reported connected. Its pod could not start for about 29 s while it waited for that Secret. **Image verification works too** (see [Image Verification](#image-verification)). **Network isolation and a quota work too** (see [Network Isolation and Quotas](#network-isolation-and-quotas)). **Removing a service works too** (see [Decommissioning a Service](#decommissioning-a-service)). **A running service is reachable from the host too** (see [Reaching a Service](#reaching-a-service)). **Not working yet:** the metrics (Phase 5). Behind the form, the database request is one small manifest:
+**Working today:** steps 1 to 5. The form validates the request, creates the service's repository from `go-app-template` through the GitHub REST API (with a fine-grained token), waits for that repository's CI to publish the first image, and commits the Application and the database request to `argocd/tenants/`. Argo CD then deploys the service from the shared chart plus the service repo's values file, and Crossplane builds the database, with no `kubectl apply`. This has run end to end four times. **Credentials are automatic too:** the database's Composition creates a `PushSecret` that copies the database password from the CloudNativePG Secret into Vault, and the shared chart creates an `ExternalSecret` that turns it into a `db-credentials` Secret in the service's namespace. On the latest run the service started with no manual step and its `/db` endpoint reported connected. Its pod could not start for about 29 s while it waited for that Secret. **Image verification works too** (see [Image Verification](#image-verification)). **Network isolation and a quota work too** (see [Network Isolation and Quotas](#network-isolation-and-quotas)). **Removing a service works too** (see [Decommissioning a Service](#decommissioning-a-service)). **A running service is reachable from the host too** (see [Reaching a Service](#reaching-a-service)). **Metrics work in part:** Prometheus and Grafana run, and a dashboard shows per-pod memory, CPU and restarts, checked on one service (see [Observability](#observability)). Behind the form, the database request is one small manifest:
 
 ```yaml
 apiVersion: rcarlsondevops.org/v1alpha1
@@ -75,7 +75,7 @@ Crossplane turns that into a Namespace (`<name>-db`), a CloudNativePG `Cluster` 
 
 ## Architecture
 
-What is built so far. Prometheus is not drawn because it does not exist yet. The credentials path is drawn with dashed lines for the data flow: the Composition creates the `PushSecret` and the shared chart creates the `ExternalSecret`. The request path from the developer's machine to a service goes through Traefik. The form generates the files in `argocd/tenants/`; they can also still be placed by hand.
+What is built so far. Prometheus and Grafana are drawn: the kubelet on each node feeds Prometheus, and the dashboard reaches Grafana as a ConfigMap that Argo CD syncs from Git. The credentials path is drawn with dashed lines for the data flow: the Composition creates the `PushSecret` and the shared chart creates the `ExternalSecret`. The request path from the developer's machine to a service goes through Traefik. The form generates the files in `argocd/tenants/`; they can also still be placed by hand.
 
 ```mermaid
 flowchart LR
@@ -115,6 +115,10 @@ flowchart LR
     Pol --> IVP[ImageValidatingPolicy image-check]
     IVP -.-> Kyv
     Kyv -.->|verifies signature and SBOM attestation when pods are created| Dep
+    Argo --> KPS[kube-prometheus-stack: Prometheus, Grafana, kube-state-metrics]
+    Kbl[kubelet on each node] -.->|container metrics| KPS
+    Argo --> Dash[Dashboard ConfigMap]
+    Dash -.->|loaded by the Grafana sidecar| KPS
 ```
 
 ## Stack
@@ -135,7 +139,7 @@ flowchart LR
 | Secrets | External Secrets Operator (chart 2.12.0) + HashiCorp Vault (chart 0.34.1, standalone mode) | In use; created automatically for each service | No plaintext secrets ever committed to Git; Git holds only references. Standalone rather than dev mode on purpose: I wanted it as close to a production deployment as a local cluster allows, so it has to be initialized and unsealed by hand |
 | Ingress | Traefik (built into k3s), one Ingress per service from the shared chart | In use | Ships with k3s; reaches each service at `<service>.localhost` on host port 8081, plain HTTP, local only |
 | Network isolation and quotas | Kubernetes NetworkPolicy and ResourceQuota | In use; created automatically for each service | Each service namespace is closed by default and opened one flow at a time; the database namespace accepts connections only from its service, its own instances and the database operator. Enforcement was observed on the local cluster |
-| Observability | Prometheus + Grafana | Phase 5 | Metrics available by default for anything deployed through the platform |
+| Observability | kube-prometheus-stack (Prometheus, Grafana, kube-state-metrics, node-exporter; Alertmanager off) | In use | Container metrics from the kubelet for every namespace; one dashboard loads from Git |
 
 ## Design Decisions Worth Knowing
 
@@ -229,6 +233,35 @@ k3d cluster edit dev-cluster --port-add 8081:80@loadbalancer
 
 The limits are under [Known Limitations](#known-limitations).
 
+## Observability
+
+Prometheus and Grafana run in the `monitoring` namespace, installed by an Argo CD Application from the `kube-prometheus-stack` Helm chart. The pods are Prometheus, Grafana, the Prometheus operator, kube-state-metrics and one node-exporter per node. Alertmanager is turned off. Prometheus keeps 6 hours of data and has a memory request of 512Mi and a limit of 1Gi.
+
+**What is collected.** The kubelet on each of the three nodes is scraped through three endpoints (`/metrics`, `/metrics/cadvisor` and `/metrics/probes`), and all nine targets were up. The cAdvisor endpoint gives CPU and memory per container. Container memory for a service namespace (`dev-env`) showed up in Prometheus and in Grafana's Explore view while that namespace's `default-deny` policy applied, so these metrics needed no allow rule.
+
+**The dashboard.** Service Resources has three panels: Pod Memory Usage, Pod CPU Usage and Pod Restarts. A `namespace` drop-down at the top lists the cluster's namespaces and every panel follows it.
+
+```
+sum by (pod) (container_memory_working_set_bytes{namespace="$namespace", container!=""})
+sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="$namespace", container!=""}[5m]))
+sum by (pod) (kube_pod_container_status_restarts_total{namespace="$namespace"})
+```
+
+The dashboard is stored in Git as the ConfigMap `grafana-dashboard-service-resources` in `monitoring`, with the label `grafana_dashboard: "1"`. Grafana's dashboard sidecar watches all namespaces for that label and loads the ConfigMap. I deleted the copy I had built by hand in the Grafana UI, and after Argo CD synced the ConfigMap the dashboard appeared again. The JSON is in Grafana's classic format. This version of Grafana exports a newer format by default, and I could not confirm that the sidecar loads it.
+
+**Opening it.** There is no Ingress for Grafana or Prometheus. Use a port-forward:
+
+```bash
+kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80
+kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9091:9090
+```
+
+Grafana is then at `http://localhost:3000` and Prometheus at `http://localhost:9091`.
+
+**What it costs.** One reading of `kubectl top`, taken with the monitoring stack running and the cluster idle: the monitoring pods used about 1010 MiB of memory and 51m of CPU together (Prometheus 532 MiB, Grafana 390 MiB). The three nodes were using 2080, 678 and 3232 MiB of memory (5990 MiB in total) and 1 to 6% of CPU.
+
+The limits are listed under [Known Limitations](#known-limitations).
+
 ## Decommissioning a Service
 
 The `decommission` workflow removes a service. It takes two inputs, `service` and `confirm`, which must match. The `validate` job checks the name against a pattern (lowercase letters, numbers and hyphens, not starting or ending with a hyphen) and refuses reserved names, including the platform repository, the template repository, the platform's own Application and namespace names, and any name ending in `-db`. It prints a warning, without stopping, if the repository or the tenant folder does not exist. Because the runner can reach GitHub but not the local cluster or Vault, the workflow does the Git side only and the cluster does the rest. After validation, three jobs run in parallel, independent of each other:
@@ -258,22 +291,23 @@ Each choice below has an alternative and a price. The price is the part worth re
 | A fine-grained personal access token for repository creation | A GitHub App with short-lived tokens | Simple to set up, but tied to one person and broader than I would accept at scale. I have not checked whether a GitHub App can create repositories on a personal account |
 | Keyless cosign signing (GitHub OIDC identity, public Sigstore) | Signing with a key I manage | Verification depends on public Sigstore being reachable from the cluster (it works from this one). The identity check is a pattern that accepts any repository under the account |
 | Image verification that fails closed (`failurePolicy: Fail`) | Letting pods through when Kyverno is unreachable | While Kyverno is down, creating pods is rejected in every namespace except `kyverno` and `kube-system`. The outage case is untested |
-| Network policies and a quota in the shared chart, and ingress policies in the Composition | Leaving namespaces open, or writing the policies by hand for each service | Each new flow needs an explicit allow rule. The reachable URL needed one (`allow-traefik`), and metrics scraping will need another. A mistake in the chart reaches every service on the next sync |
+| Network policies and a quota in the shared chart, and ingress policies in the Composition | Leaving namespaces open, or writing the policies by hand for each service | Each new flow needs an explicit allow rule. The reachable URL needed one (`allow-traefik`). Container metrics from the kubelet needed none. A mistake in the chart reaches every service on the next sync |
 | Ingress-only policies on the database namespace, with no quota there | Also restricting the database pods' outgoing traffic and capping the namespace | Outgoing traffic from the database pods is unrestricted and nothing caps that namespace. The database pod declares no CPU or memory requests, so a quota there would need defaults added first |
 | A local 3-node k3d cluster | A managed cluster such as EKS | No cloud cost and a fully reproducible rebuild. The Kubernetes API is the same, but there is no real cloud IAM, load balancer or managed storage, and I make no production claims |
 
-**What it costs to run:** nothing in cloud spend, since everything runs on one laptop. I have not yet measured the laptop's memory and CPU use with every component running.
+**What it costs to run:** nothing in cloud spend, since everything runs on one laptop. I have one reading of the laptop's memory and CPU use with the monitoring stack running: 5990 MiB of memory in use across the three nodes and 1 to 6% CPU, at idle (see [Observability](#observability)). I have not checked how much memory Docker gives the nodes, or what happens as services are added.
 
 ## The Golden Path: New Service in Under 10 Minutes
 
-_Measured on a local cluster: 281 s from submitting the form to a Ready service in the latest run, with the service's credentials set up automatically (earlier runs: 278 s and 401 s). One part is not there yet: the Grafana metrics in step 6 arrive in Phase 5._
+_Measured on a local cluster: 281 s from submitting the form to a Ready service in the latest run, with the service's credentials set up automatically (earlier runs: 278 s and 401 s). The metrics step works in part: see [Observability](#observability)._
 
 1. Open the platform repo's **Actions** tab, select the self-service workflow, and click **Run workflow**
 2. Fill in the service and team name, the number of database instances, and the database size
 3. Submit — the workflow validates the request, creates the service's repo from the template, waits for its first image, and commits the service's Application to `argocd/tenants/`
 4. Argo CD syncs the new commit and Crossplane provisions the infrastructure
 5. Watch the rollout in Argo CD
-6. Your service answers at `http://<service>.localhost:8081` (metrics in Grafana arrive in Phase 5)
+6. Your service answers at `http://<service>.localhost:8081`
+7. Open the Service Resources dashboard in Grafana, choose the service's namespace, and see its memory, CPU and restarts (see [Observability](#observability))
 
 ## What's Next at Scale
 
@@ -286,6 +320,7 @@ _Measured on a local cluster: 281 s from submitting the form to a Ready service 
 - **The foundation layer as Terraform:** `bootstrap.sh` is a script because the cluster is a disposable local k3d cluster and k3d has no officially maintained Terraform support. For real clusters, networking, and identity, Terraform is where I would put that slow-changing layer, run by a human with reviewed plans and remote state, leaving Crossplane for per-request resources and Argo CD for everything in Git
 - **Faster change detection:** Argo CD polls Git on an interval (the default interval is 3 minutes; the measured delay was 189 s and 261 s), and a local k3d cluster is not reachable by a GitHub webhook. A webhook (or a refresh trigger) would remove that wait on a real cluster
 - **A GitHub App instead of a personal token:** the self-service form creates repositories with a fine-grained personal access token tied to one person. A GitHub App with narrow, short-lived installation tokens is the scalable replacement
+- **Alerting and metric storage:** Alertmanager is off and Prometheus keeps 6 hours of data without a volume. A shared cluster would need alert rules, a route to people, and storage that outlives the Prometheus pod
 - **TLS, real DNS and tracing:** services are reached over plain HTTP at a `.localhost` name. This version has no certificate management (cert-manager), no real DNS and no distributed tracing
 - **A production-grade Vault:** auto-unseal from a cloud KMS so a restart needs no human, a multi-replica Raft cluster, TLS between External Secrets and Vault, and unseal key shares split between several people, and a Vault role and policy per service instead of one shared role. The local setup has one replica, plain HTTP inside the cluster, one shared role, and unseal keys held by one person
 
@@ -361,7 +396,7 @@ kubectl get postgresdatabase           # READY=True after about a minute
 kubectl get cluster,pods -n <service>-db
 ```
 
-Once the service's pod is Ready, open `http://<service>.localhost:8081` (see [Reaching a Service](#reaching-a-service)).
+Once the service's pod is Ready, open `http://<service>.localhost:8081` (see [Reaching a Service](#reaching-a-service)). Its memory, CPU and restarts are on the Service Resources dashboard (see [Observability](#observability)).
 
 To remove a service, run the `decommission` workflow (see [Decommissioning a Service](#decommissioning-a-service)). Removing a service's folder from `argocd/tenants/` by hand also removes the service, its database and the data, but not its repository, image or Vault entry.
 
@@ -385,7 +420,13 @@ Rolling that image out is done by an Application in `argocd/tenants/` that combi
 
 ## Known Limitations
 
-- The service template exposes no application-level metrics; Phase 5 covers container-level metrics only.
+- The service template exposes no application-level metrics; only container-level metrics are collected. Scraping a service's own `/metrics` was not tested and would probably need its own allow rule in the service namespace.
+- Prometheus data is not stored on a volume. The only persistent volume in `monitoring` is Grafana's (1Gi, `local-path`). I did not look inside the Prometheus pod; the missing volume claim is why I expect its data to be lost when the pod is recreated, for example on a cluster rebuild. It keeps 6 hours of data.
+- Alertmanager is off, so there are no alerts.
+- There is one shared dashboard with a namespace drop-down, not one dashboard per service. It was checked on one service (`dev-env`).
+- The dashboard has no panel for usage against the quota. A `kube_resourcequota` query returned no data and I did not find out why.
+- Grafana uses the chart's own admin account. Its password is not in Vault and not managed by External Secrets. Grafana's data is on its 1Gi volume, which does not survive a cluster rebuild, though the dashboard does because it comes from Git.
+- The kubelet scrape is the only target set I checked. I did not look at the other targets the chart creates, such as the control-plane components.
 - Generated service repositories are public in this version, and so are their images.
 - The self-service form creates repositories with a fine-grained personal access token, which is broader than I would accept at scale.
 - Argo CD polls Git every 3 minutes by default, and I measured 189 s and 261 s before it noticed a new tenant commit. This is the largest part of the form-to-service time. The interval is configurable and I left it at the default. A webhook cannot reach a local k3d cluster.
@@ -399,7 +440,7 @@ Rolling that image out is done by an Application in `argocd/tenants/` that combi
 - The service's `/db` endpoint is unauthenticated and opens a new database connection on every call. That is acceptable on a local cluster and is not something to expose. I have not set `sslmode` in the connection URL; I believe the driver tries TLS and falls back to plain without verifying the certificate, but I have not checked which one is used here, so treat database connections as unencrypted.
 - Database volumes cannot be resized (the local storage class disallows expansion), and deleting a request deletes its data.
 - Two guardrails are built: image verification, covering the signature and the SBOM attestation (see Image Verification), and network isolation with a quota (see Network Isolation and Quotas). Kyverno enforces only the image check. Secrets management covers the database password only: it reaches each service through Vault and External Secrets with nothing in Git, but every service shares one Vault role that can read, write and delete every service's path under `tenants/`, and the password also still sits in the Secret CloudNativePG generates, which is where Vault's copy comes from.
-- Network isolation covers the service and database namespaces only. The platform's own namespaces (Argo CD, Vault, External Secrets, Crossplane, CloudNativePG, Kyverno) have no policies. In the database namespace only incoming traffic is restricted: outgoing traffic from the database pods is not, and the namespace has no quota or default resource requests, because the database pod declares none. In the service namespace the only incoming rule is the one for Traefik; incoming traffic from other sources was not tested, and metrics scraping will need its own allow rule.
+- Network isolation covers the service and database namespaces only. The platform's own namespaces (Argo CD, Vault, External Secrets, Crossplane, CloudNativePG, Kyverno) have no policies. In the database namespace only incoming traffic is restricted: outgoing traffic from the database pods is not, and the namespace has no quota or default resource requests, because the database pod declares none. In the service namespace the only incoming rule is the one for Traefik; incoming traffic from other sources was not tested. Container metrics from the kubelet reach Prometheus with `default-deny` in place.
 - The quota is the same for every service: 4 pods, 200m and 128Mi of requests, 800m and 256Mi of limits. A pod that declares no requests and limits is rejected, so the chart has to set them. A service that needs more has to change the shared chart, which changes every service.
 - The network policies and the quota come from the shared chart, so they reach a service on the next sync. A service created before they existed received them the same way.
 - Image verification accepts a signature and attestation from any repository under the `rcarlson-devops` account: the policy matches the signing workflow's identity with a pattern, so any workflow on `main` in any of them can produce an image that passes.
