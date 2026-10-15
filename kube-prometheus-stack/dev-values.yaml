@@ -3,6 +3,8 @@ alertmanager:
 grafana:
   enabled: true
   defaultDashboardsEnabled: false
+  label: grafana_dashboard
+  labelValue: "1"
   persistence:
     enabled: true
     storageClassName: local-path
