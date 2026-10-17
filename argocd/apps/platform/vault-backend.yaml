@@ -1,19 +1,21 @@
-apiVersion: external-secrets.io/v1
-kind: ClusterSecretStore
+apiVersion: argoproj.io/v1alpha1
+kind: Application
 metadata:
   name: vault-backend
+  namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "3"
 spec:
-  provider:
-    vault:
-      server: "http://vault.vault.svc.cluster.local:8200"
-      path: "secret"
-      version: "v2"
-      auth:
-        kubernetes:
-          mountPath: "kubernetes"
-          role: "eso"
-          serviceAccountRef:
-            name: "external-secrets"
-            namespace: "external-secrets"
+  project: default
+  source:
+    repoURL: https://github.com/rcarlson-devops/self-service-idp.git
+    targetRevision: main
+    path: vault-backend
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+#    syncOptions:
+#      - SkipDryRunOnMissingResource=true
