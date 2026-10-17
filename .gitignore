@@ -19,3 +19,6 @@ Thumbs.db
 kubeconfig
 kubeconfig.yaml
 *.kubeconfig
+
+# Python
+.venv
