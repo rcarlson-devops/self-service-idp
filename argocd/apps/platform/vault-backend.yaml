@@ -4,7 +4,7 @@ metadata:
   name: vault-backend
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   project: default
   source:
@@ -17,5 +17,9 @@ spec:
     automated:
       prune: true
       selfHeal: true
-#    syncOptions:
-#      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 1
+        maxDuration: 3m
