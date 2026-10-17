@@ -45,6 +45,28 @@ kubectl -n argocd rollout status statefulset/argocd-application-controller --tim
 echo "==> 4/4 root application (hands control to Git)"
 kubectl apply -f argocd/root.yaml
 
+echo "==> Waiting for Vault infrastructure rollout..."
+until kubectl get statefulset vault -n vault &>/dev/null; do
+  echo "  Waiting for Vault statefulset manifest creation by ArgoCD..."
+  sleep 5
+done
+kubectl rollout status statefulset/vault -n vault --timeout=300s
+
+echo "==> Preparing Python Virtual Environment..."
+if [ ! -d ".venv" ]; then
+  echo "  Creating new virtual environment in .venv/..."
+  python3 -m venv .venv
+fi
+
+source .venv/bin/activate
+
+echo "  Installing dependencies..."
+pip install -q -r bootstrap/scripts/requirements.txt
+
+echo "==> Triggering Python Vault configuration engine..."
+python3 bootstrap/scripts/src/configure-vault.py
+deactivate
+
 cat <<MSG
 
 Done. Argo CD UI:  https://localhost:8080  (self-signed cert; try http:// if https fails)
