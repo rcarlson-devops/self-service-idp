@@ -14,6 +14,13 @@ kind: Kustomization
 namespace: argocd
 resources:
   - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.3/manifests/install.yaml
+configMapGenerator:
+  - name: argocd-cm
+    behavior: merge
+    files:
+      - resource.customizations.health.argoproj.io_Application=app-health.lua
+      - resource.customizations.ignoreResourceUpdates.argoproj.io_Application=app-ignore.yaml
+      - resource.customizations.ignoreResourceUpdates.all=all-ignore.yaml
 patches:
   - target:
       kind: Service
