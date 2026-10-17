@@ -19,6 +19,7 @@ configMapGenerator:
     behavior: merge
     files:
       - resource.customizations.health.argoproj.io_Application=app-health.lua
+      - resource.customizations.health.pkg.crossplane.io_Function=crossplane-health.lua
       - resource.customizations.ignoreResourceUpdates.argoproj.io_Application=app-ignore.yaml
       - resource.customizations.ignoreResourceUpdates.all=all-ignore.yaml
 patches:
