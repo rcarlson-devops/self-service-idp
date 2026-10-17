@@ -1,14 +1,18 @@
 # One-time setup
 
-This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Steps 4 to 6 are what you re-run whenever you rebuild the cluster. Step 7 describes how the database password moves from CloudNativePG through Vault to the app. Nothing in step 7 is applied by hand: the database Composition and the shared chart create those objects for every service.
+This page covers everything you do **once** before the platform works. The GitHub-side steps (1 to 3) survive a cluster rebuild. Step 4 is what you re-run whenever you rebuild the cluster, and it also sets Vault up: steps 5 and 6 describe what the bootstrap does there and give the manual commands. Step 7 describes how the database password moves from CloudNativePG through Vault to the app. Nothing in step 7 is applied by hand: the database Composition and the shared chart create those objects for every service.
 
-Order matters: do the GitHub setup first, then bootstrap the cluster, then initialize Vault, then configure it for External Secrets. After that, every service brings its own credentials objects.
+Order matters: do the GitHub setup first, then bootstrap the cluster, which also initializes Vault and configures it for External Secrets. After that, every service brings its own credentials objects.
 
 ## Prerequisites
 
 - Docker, `k3d` and `kubectl` installed and working.
 - A GitHub account that owns two repositories: this one (`self-service-idp`) and the template repo (`go-app-template`).
 - The GitHub CLI (`gh`) and `yq` (the mikefarah/Go version, v4) if you want to run the checks in this guide locally. Two unrelated tools are both called `yq`; check with `yq --version` that yours says `mikefarah/yq`.
+- `pass` (the Linux password store) set up with a GPG key. The bootstrap keeps Vault's root token and unseal keys there, and it runs `pass ls` first, so it stops early if `pass` does not work. Back up the GPG key (see Known limits).
+- Python 3, for the Vault setup script (`bootstrap/scripts/src/configure_vault.py`).
+- Local port 18200 free. The Vault setup reaches `vault-0` through `kubectl port-forward` on that port, not through Traefik.
+- On WSL2, enough memory. Memory in use peaked at 7.2 to 7.8 GiB during a build. My `.wslconfig` sets `memory=10GB` and `swap=8GB`. Before I raised the limit the machine froze during a build; I believe it ran out of memory but did not confirm it. Close VS Code windows attached to WSL before `wsl --shutdown`, or they keep `vmmemWSL` alive.
 
 ## 1. Create the template repo
 
@@ -43,6 +47,8 @@ Why this is a trade-off: a token that can create repositories is broad. It is ti
 
 Also make sure the form workflow can write to the repo: it must declare `permissions: contents: write`, because it commits the new service's files to `argocd/tenants/`.
 
+The `decommission` workflow needs a second token to delete the service's image package: a classic personal access token with only the `delete:packages` scope (GitHub adds `read:packages` with it), stored as its own Actions secret. A fine-grained token could not delete packages. The secret's name is in the `decommission` workflow.
+
 ### Testing the token from your own terminal (optional)
 
 `gh` reads the token from the `GH_TOKEN` environment variable. Set it for one terminal session only, reading the value from your password manager:
@@ -65,12 +71,18 @@ Notes:
 
 This is the part you repeat after every rebuild.
 
-1. From the repo root, run `bootstrap/bootstrap.sh`. It creates the k3d cluster if it is missing, installs Argo CD, waits for Argo's workloads, and applies `argocd/root.yaml`.
-2. Argo CD then installs everything else from Git. Wait until every Application **except Vault** is Synced and Healthy. Vault stays not Healthy until you initialize and unseal it in step 5:
+1. From the repo root, run `bootstrap/bootstrap.sh`. It creates the k3d cluster if it is missing, installs Argo CD, waits for Argo's workloads and applies `argocd/root.yaml`. It then sets Vault up (steps 5 and 6): it checks `pass ls` at the start, waits for the `vault-0` pod to exist and be Running, and reaches Vault through a port-forward on local port 18200. It is safe to re-run. Do not edit `bootstrap.sh` while it runs: an edit during one run produced `ubectl: command not found`.
+   - It waits for the pod to be Running, not Ready, because a standalone Vault is not Ready until it is unsealed.
+2. Argo CD then installs everything else from Git, in three sync waves. Wait until every Application is Synced and Healthy. On a cold build that took 8 to 10 minutes (480 s, 506 s and 598 s in the three builds I timed), almost all of it in wave 0:
    ```
    kubectl get applications -n argocd
    ```
-   You should see `cloudnativepg-operator`, `crossplane-functions`, `crossplane-operator`, `database-api`, `external-secrets-operator`, `hashicorp-vault`, the Kyverno install, `kyverno-policies`, `self-service-idp-root` and `self-service-idp-tenants`, plus one Application per service you have created.
+   You should see 14 Applications, plus one per service you have created:
+   - Wave 0: `cloudnativepg-operator`, `crossplane-operator`, `external-secrets-operator`, `hashicorp-vault`, `kube-prometheus-stack` and `kyverno`.
+   - Wave 1: `crossplane-functions`, `database-api`, `grafana-dashboards`, `kyverno-policies`, `monitoring-ingress` and `vault-backend`.
+   - Wave 2: `self-service-idp-tenants`. The root, `self-service-idp-root`, is the fourteenth.
+
+   Notes on the Vault and External Secrets Applications:
    - The Vault Application is `argocd/apps/operators/hashicorp-vault.yaml` (Helm chart 0.34.1). It deploys into the `vault` namespace.
    - The External Secrets Application is `external-secrets-operator` in `argocd/apps/operators/external-secrets.yaml` (Helm chart 2.12.0). It deploys into the `external-secrets` namespace.
    - The Vault Application is named `hashicorp-vault`, and its values set `global.tlsDisable: true`, so Vault serves plain HTTP inside the cluster.
@@ -79,13 +91,24 @@ This is the part you repeat after every rebuild.
    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
    ```
 
-Because services and databases are defined in Git (`argocd/tenants/`), a rebuild brings them back automatically. The exception is Vault: its keys, its configuration and its contents belong to one cluster build (steps 5 and 6). Once Vault is configured and unsealed, the credentials objects of the returning services sync again (step 7).
+Because services and databases are defined in Git (`argocd/tenants/`), a rebuild is meant to bring them back automatically. The three rebuilds I timed started with no services in `argocd/tenants/`, so I have not retested that since Vault's setup moved into the bootstrap. Vault is the exception: its keys, its configuration and its contents belong to one cluster build, so a rebuild gives a new Vault, which `bootstrap.sh` initializes and configures again (steps 5 and 6). Once that is done, the credentials objects of any returning services sync again (step 7).
 
-The `vault-backend` store (`argocd/apps/platform/vault-backend.yaml`) is applied by the root Application together with the External Secrets Application, and it needs the External Secrets CRDs. It has not been tested on a fresh rebuild since it was added. If the store is missing or the root Application reports a sync error about an unknown kind after a rebuild, sync the root Application again once External Secrets is Healthy.
+The `vault-backend` store (`argocd/apps/platform/vault-backend.yaml`) needs the External Secrets CRDs and webhook, so it is in sync wave 1, after External Secrets (wave 0) is Healthy. It synced without a retry in each of the three rebuilds I timed. After a rebuild, check it with `kubectl get clustersecretstore vault-backend`, which should report Valid and Ready (see 6g).
 
 ## 5. Initialize and unseal Vault
 
-Vault runs in **standalone mode**. This is a deliberate choice: it is much closer to a production deployment than dev mode, which initializes and unseals itself. In standalone mode a new Vault starts **uninitialized and sealed**, and its pod is not Ready until you initialize and unseal it by hand. Argo CD cannot do this for you, and the keys it produces must never be committed to Git.
+Vault runs in **standalone mode**. This is a deliberate choice: it is much closer to a production deployment than dev mode, which initializes and unseals itself. In standalone mode a new Vault starts **uninitialized and sealed**, and its pod is not Ready until it is initialized and unsealed. Argo CD cannot do this, and the keys it produces must never be committed to Git, so `bootstrap.sh` does it, through `bootstrap/scripts/src/configure_vault.py`, and the keys go to `pass`.
+
+The script reads Vault's `seal-status` and then does one of two things:
+
+- **Not initialized (a new cluster).** It first writes and removes a probe entry in `pass`, so it fails before it initializes Vault if `pass` cannot store anything. It then initializes Vault, saves the root token and three unseal keys in `pass` (`infrastructure/vault/root_token` and `infrastructure/vault/unseal_key_1` to `unseal_key_3`), unseals Vault and configures it (step 6).
+- **Already initialized (a re-run, or a Vault pod that restarted).** It reads the keys from `pass`, which asks for your GPG passphrase, unseals Vault if it is sealed, and applies the configuration again.
+
+Every Vault call is checked, and mounts are checked before they are created, so a re-run is safe. I ran this on a real cluster: the first run initialized Vault, and a re-run read the keys from `pass`, unsealed Vault and re-applied the configuration. Afterwards all 14 Applications were Synced and Healthy.
+
+### Doing it by hand
+
+If you cannot use the script, these are the manual commands. If you initialize by hand and later want `bootstrap.sh` to work, store the root token and three unseal keys under the same `pass` entries.
 
 The Vault pod is `vault-0` in the namespace `vault`. If you ever need to confirm that:
 
@@ -114,8 +137,8 @@ kubectl get pods -A | grep vault
 
 Things to know:
 
-- **Init is once per Vault, not once per restart.** Running it on an already initialized Vault is refused. If the Vault pod restarts it comes back sealed (the normal behavior without auto-unseal), and you repeat only step 3.
-- **A cluster rebuild means a new init.** After `k3d cluster delete` and a fresh bootstrap, the old keys are useless and Vault's old contents are gone. Repeat steps 1 to 4 and store the new keys. Anything that lived only in Vault has to be put back; the plan is that database passwords are repopulated from the CloudNativePG Secrets, which stay the source of truth.
+- **Init is once per Vault, not once per restart.** Running it on an already initialized Vault is refused. If the Vault pod restarts it comes back sealed (the normal behavior without auto-unseal), and you either re-run `bootstrap.sh` or repeat only step 3.
+- **A cluster rebuild means a new init.** After `k3d cluster delete` and a fresh bootstrap, the old keys are useless and Vault's old contents are gone. The bootstrap initializes the new Vault and stores the new keys in `pass`; by hand, repeat steps 1 to 4 and store them yourself. Anything that lived only in Vault has to be put back; the plan is that database passwords are repopulated from the CloudNativePG Secrets, which stay the source of truth.
 - **The root token is for one-time setup only.** Use it to configure Vault (step 6), then stop using it for day-to-day work.
 
 Why a sealed Vault matters: External Secrets cannot read from a sealed Vault, so a sealed Vault stops new services from receiving their credentials and stops refreshes until someone unseals it. Secrets that were already synced keep working, and a restarted service pod still starts, because it needs the Secret and not Vault. This was tested once; the results are under "Known limits" at the end of this page.
@@ -124,7 +147,7 @@ Why a sealed Vault matters: External Secrets cannot read from a sealed Vault, so
 
 A freshly initialized Vault holds nothing and trusts nobody. This step teaches it three things: where secrets live (a KV engine), how External Secrets proves who it is (Kubernetes auth), and what that identity may touch (a policy and a role). It is also the only step where you use the root token, so do it in one sitting.
 
-**This configuration lives inside Vault, not in Git.** A cluster rebuild loses it, so you repeat this whole step after every rebuild. (Moving this step into the bootstrap scripts is planned for later. A script must never contain the root token or the unseal keys.)
+**This configuration lives inside Vault, not in Git.** A cluster rebuild loses it, so `bootstrap.sh` applies it again on every run, as the last part of its Vault setup (step 5). The script contains no secrets: the root token and the unseal keys come from `pass`. The commands in 6a to 6g show what the configuration consists of, and are the manual route.
 
 ### 6a. Open a shell in the Vault pod and log in with the root token
 
@@ -245,7 +268,7 @@ spec:
 ```
 
 - `server` is Vault's in-cluster Service address. Confirm the Service name with `kubectl get svc -n vault`. Never use `127.0.0.1` here either: inside the External Secrets pod that address is the pod itself.
-- This manifest is kept in the monorepo at `argocd/apps/platform/`, so Argo applies it. The External Secrets CRDs must already exist (they come from the External Secrets Application), so the store has to sync after them.
+- This manifest is kept in the monorepo at `argocd/apps/platform/`, so Argo applies it. The External Secrets CRDs and webhook must already exist (they come from the External Secrets Application), so the `vault-backend` Application is in sync wave 1, after External Secrets (wave 0) is Healthy.
 
 Check that the store is accepted. It should report Valid and Ready, and Vault must be unsealed:
 
@@ -253,6 +276,8 @@ Check that the store is accepted. It should report Valid and Ready, and Vault mu
 kubectl get clustersecretstore vault-backend
 kubectl describe clustersecretstore vault-backend
 ```
+
+Do not rely on Argo CD for this check. After I deleted `vault-0`, `vault-backend` and the `ClusterSecretStore` stayed Healthy in Argo CD while Vault was sealed. I believe, from a third-party source I did not verify, that Argo CD has no built-in health check for this kind, so `kubectl get clustersecretstore vault-backend` is the check.
 
 ### Rules for this step
 
@@ -387,7 +412,7 @@ curl -s localhost:9000/db
 
 ### 7e. After a rebuild
 
-Services and databases come back from Git, and with them the `PushSecret` (from the Composition) and the `ExternalSecret` (from the chart). With Vault initialized, configured and unsealed (steps 5 and 6), the `PushSecret` writes the password from the CloudNativePG Secret back into Vault, and the `ExternalSecret` then creates `db-credentials`. No order is enforced between these pieces. Until `db-credentials` exists, a service pod cannot start: a freshly generated service showed a `secret "db-credentials" not found` event for about 11 seconds and then started on its own.
+Services and databases come back from Git, and with them the `PushSecret` (from the Composition) and the `ExternalSecret` (from the chart). With Vault initialized, configured and unsealed (steps 5 and 6), the `PushSecret` writes the password from the CloudNativePG Secret back into Vault, and the `ExternalSecret` then creates `db-credentials`. No order is enforced between these pieces. Until `db-credentials` exists, a service pod cannot start: in the two services I deployed on 2026-10-17 the pod reported `secret "db-credentials" not found` until the `ExternalSecret` created it, 5 s and 10 s after the database became Ready, and the pod was Ready 11 s and 14 s after that, with no action from me.
 
 If a `PushSecret` still shows `Errored` after Vault is ready, `kubectl describe pushsecret db-credentials -n <service>-db` names the cause.
 
@@ -402,8 +427,8 @@ If a `PushSecret` still shows `Errored` after Vault is ready, `kubectl describe 
 | Blueprints the form fills in | `self-service/templates/` (never synced by Argo) |
 | Shared Helm chart | `charts/app/` |
 | Secret for repo creation | Actions secret `REPO_CREATOR_PAT` |
-| Vault unseal keys and initial root token | `pass` only, never in Git |
-| Vault configuration (KV engine, Kubernetes auth, policy `eso`, role `eso`) | Inside Vault only; redo step 6 after a rebuild |
+| Vault unseal keys and initial root token | `pass` only (`infrastructure/vault/`), never in Git |
+| Vault configuration (KV engine, Kubernetes auth, policy `eso`, role `eso`) | Inside Vault only; `bootstrap.sh` applies it again on every run |
 | Tenant secrets in Vault | `secret/tenants/<service>/db` |
 | ClusterSecretStore `vault-backend` | `argocd/apps/platform/` |
 | `PushSecret` per service (created for each database request) | the `PostgresDatabase` Composition in `crossplane/` |
@@ -422,15 +447,15 @@ Removing a service is a Git change, and Argo CD prunes automatically, so **delet
 
 ## Known limits
 
-- Argo CD polls Git every 3 minutes, so a new service can take up to that long to appear. A webhook would remove the wait, but a local k3d cluster is not reachable from GitHub.
+- Argo CD polls Git every 3 minutes by default, so a new service can take about that long to appear (I measured 133 s and 196 s). A webhook would remove the wait, but a local k3d cluster is not reachable from GitHub.
 - Generated service repositories are public.
 - The repository-creation token is broad, as described in step 2.
 - Vault is a local approximation of a production deployment. It runs in standalone mode as a single replica, so there is no fault tolerance, and it talks plain HTTP inside the cluster (this version has no TLS).
-- Vault is unsealed by hand. Production would use auto-unseal backed by a cloud KMS or HSM; that is not available on a local, free-tier setup, and a script that holds the unseal keys would defeat the point. After every Vault pod restart or cluster rebuild a person has to unseal it, so the rebuild is not fully hands-off.
+- Vault is not auto-unsealed. Production would use auto-unseal backed by a cloud KMS or HSM; that is not available on a local, free-tier setup, and a script that carried the unseal keys itself would defeat the point. `bootstrap.sh` reads them from `pass` at run time, which asks for the GPG passphrase, so a person with the GPG key still has to be there. After every Vault pod restart, someone has to re-run `bootstrap.sh` or unseal by hand.
 - The unseal keys and root token are held by one person in `pass`. In production the key shares would be split between several people. `pass` encrypts with a GPG key, so back up that key safely: losing it means losing the Vault keys and root token.
-- Vault's configuration is not in Git, so every rebuild means repeating step 6 by hand. Moving it into the bootstrap scripts is planned for later.
+- Vault's configuration is not in Git and Argo CD does not apply it; `bootstrap.sh` applies it on every run instead.
 - All tenants share one External Secrets identity (the role `eso`). That identity can read, write and delete every tenant's path under `secret/tenants/`, so a service is not limited to its own secret. A per-tenant role and store would fix this, but something would have to create them for each new service; that is left for when the credentials path is automated.
-- **Sealed Vault, tested once.** Deleting the Vault pod left Vault sealed with its data intact (it is on a persistent volume). While it was sealed: the already-synced `db-credentials` Secret stayed in place; the running service kept its database connection; a restarted service pod still came up; new `ExternalSecret`s could not sync (`503`); and the `vault-backend` store reported errors, though its status lagged the seal at first. After the unseal, syncing resumed with no action, in about 4 minutes 19 seconds in that one run. So a sealed Vault blocks new services and credential changes, not running ones. Not tested: what a `PushSecret` does while Vault is sealed.
+- **Sealed Vault, tested once.** Deleting the Vault pod left Vault sealed with its data intact (it is on a persistent volume). While it was sealed: the already-synced `db-credentials` Secret stayed in place; the running service kept its database connection; a restarted service pod still came up; new `ExternalSecret`s could not sync (`503`); and the `vault-backend` store reported errors, though its status lagged the seal at first. After the unseal, syncing resumed with no action. So a sealed Vault blocks new services and credential changes, not running ones. Not tested: what a `PushSecret` does while Vault is sealed.
 - Removing a service while Vault is sealed has not been tested.
 - A pod reads its credentials Secret when it starts, so a changed password reaches a running pod only after a restart (believed from standard Kubernetes behavior; not tested here). Nothing restarts pods automatically yet. Whether CloudNativePG ever rotates the password by itself has not been checked.
 - The reserved-name list in the form (`validate` job) is missing `hashicorp-vault`, `external-secrets-operator`, `kube-public` and `kube-node-lease`.

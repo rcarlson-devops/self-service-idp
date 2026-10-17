@@ -32,6 +32,24 @@ Problems I hit while building the platform, what caused them, and how I fixed th
   - The service Application carries the `resources-finalizer.argocd.argoproj.io` finalizer, so deleting an Application by hand also deletes what it deployed.
   - After the prune, the database namespace (created by Crossplane) was deleted but the service namespace (created by Argo CD's `CreateNamespace` option) stayed behind, empty as far as I could see.
 
+### An Application failed its first sync with `no endpoints available for service "external-secrets-webhook"`
+- **Symptom:** after a fresh rebuild, `vault-backend` failed with `no endpoints available for service "external-secrets-webhook"`. Several Git-sourced Applications showed sync status Unknown in the same snapshot.
+- **Cause (likely, not isolated):** External Secrets' webhook had no running pod yet when `vault-backend` tried to create the `ClusterSecretStore`, and `vault-backend` had no `retry`. I inferred this from the message and did not look at the webhook pod at the time.
+- **Fix:** the sync waves put External Secrets at wave 0 and `vault-backend` at wave 1, and the Applications that failed their first sync have a `retry` block. In the three rebuilds on 2026-10-17, `vault-backend` synced without a retry every time.
+- **Not tested:** whether the waves or the retry alone would have been enough.
+- **Lesson:** a sync wave only orders what happens within one sync, so the change has to be tested with a fresh `k3d cluster delete` and bootstrap, not by pushing to a running cluster.
+
+### The bootstrap's wait for Vault failed with `only available for RollingUpdate strategy type`
+- **Symptom:** `kubectl rollout status` on the Vault StatefulSet failed with that message.
+- **Cause:** `rollout status` works on a StatefulSet only with the RollingUpdate update strategy, so Vault's StatefulSet does not use it. I did not check which strategy it has.
+- **Fix:** the script waits for the `vault-0` pod to exist and then for its phase to be Running. It does not wait for Ready, because a standalone Vault is not Ready until it is unsealed, which is what the script does next.
+
+### `kubectl` returned EOF after restarting WSL
+- **Symptom:** after a WSL restart, `kubectl` returned `EOF`.
+- **Cause:** the proxy in the k3d load balancer container, which sits in front of the API server, had gone stale. I did not investigate why.
+- **Fix:** `docker restart k3d-dev-cluster-serverlb`.
+- **Related:** `wsl --shutdown` did not free the memory while VS Code windows attached to WSL were open, because they kept `vmmemWSL` alive. Close them first.
+
 ## Crossplane and RBAC
 
 ### Crossplane could not create the Namespace
@@ -107,6 +125,7 @@ Found by reading it before running it:
 ### Timing: which timestamp to trust
 - **Cause:** an Application's `operationState.startedAt` is overwritten by any later sync.
 - **Fix:** I use the child Application's `creationTimestamp` as the zero point for platform time.
+- **Related (cluster rebuilds):** the root Application's `operationState` says little about a rebuild. In two builds its sync spanned every child (385 s and 432 s), so the timing script named the root as the slowest sync; in the first build a later sync had overwritten it (477 s to 477 s). The README's per-Application figures leave the root out.
 
 ## Vault and External Secrets
 
@@ -121,3 +140,23 @@ Found by reading it before running it:
 - **Cause:** the `eso` policy lacked `create` and `update` on `secret/metadata/tenants/*`. I had been told it covered the push without checking.
 - **Fix:** add those capabilities on the metadata path rather than widening the policy.
 - **Lesson:** read the denial message, which names the path, and check what a provider needs before saying a policy is enough.
+
+## Networking and observability
+
+### A request through Traefik returns 502
+- **Symptom:** `http://<service>.localhost:8081` returns `502 Bad Gateway`.
+- **Cause:** the service namespace has a `default-deny` NetworkPolicy, which blocks incoming traffic, including traffic from Traefik's pods in `kube-system`.
+- **Fix:** the shared chart creates an `allow-traefik` NetworkPolicy that lets Traefik reach the service's pods on the container port. Once it synced, requests reached the service. If the 502 comes back, list the namespace's policies with `kubectl get networkpolicy -n <service-namespace>`. `default-deny` and `allow-traefik` should both be there. If `allow-traefik` is missing, check that the service's Argo CD Application has synced.
+
+### A service has no row on Prometheus's Targets page
+- **Symptom:** the service's `/metrics` endpoint works, but Prometheus's Targets page has no row for it at all. A row that says DOWN would be a different problem.
+- **Cause:** the ServiceMonitor did not match the Service. In the chart's first version, the endpoint used `targetPort: http`, and Prometheus created no target.
+- **Fix:** the endpoint uses `port: http`, which refers to the Service's port name. The chart's Service names its port `http`, so the two match, and the target appeared.
+- **Telling the two cases apart:**
+  - A missing row means the ServiceMonitor did not select the Service. Check the endpoint's `port` field, the label selector, and the `release: kube-prometheus-stack` label that Prometheus selects on.
+  - A DOWN row means Prometheus found the target but could not scrape it. Check the `allow-prometheus` NetworkPolicy in the service namespace.
+
+### A dashboard query returns nothing in Explore
+- **Symptom:** a query copied from a dashboard panel, such as `rate(http_requests_total{namespace="$namespace"}[5m])`, returns no data in Grafana's Explore view.
+- **Cause:** `$namespace` is a variable defined on the dashboard. Explore has no dashboard variables, so nothing fills it in.
+- **Fix:** replace `$namespace` with the namespace name, for example `namespace="dev-env-3"`.
