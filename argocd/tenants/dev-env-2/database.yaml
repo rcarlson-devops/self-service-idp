@@ -1,0 +1,8 @@
+apiVersion: rcarlsondevops.org/v1alpha1
+kind: PostgresDatabase
+metadata:
+  name: dev-env-2
+spec:
+  team: dev-team-test-2
+  instances: 1
+  size: small
