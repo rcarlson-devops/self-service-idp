@@ -1,0 +1,110 @@
+name: Decommission tenant
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Name of the tenant repo and resources to be deleted'
+        required: true
+        type: string
+      confirm:
+        description: 'Re-enter name of the tenant repo and resources to be deleted for confirmation'
+        required: true
+        type: string
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: repo-group
+    env:
+      CONFIRM: ${{ inputs.confirm }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SERVICE: ${{ inputs.service }}
+    steps:
+      - name: Validate inputs
+        run: |
+          if [[ "$SERVICE" != "$CONFIRM" ]]; then
+            echo "Error: Service and Confirm must match."
+            echo "Error: Service and Confirm must match." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [[ ! "$SERVICE" =~ ^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$ ]]; then
+            echo "Error: Service name must be lowercase letters or numbers and can include hyphens, but cannot start or end with a hyphen."
+            echo "Error: Service name must be lowercase letters or numbers and can include hyphens, but cannot start or end with a hyphen." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          case "$SERVICE" in
+            argocd|default|kube-*|crossplane-system|cnpg-system|\
+            cloudnativepg-operator|crossplane-functions|crossplane-operator|\
+            database-api|self-service-idp-root|self-service-idp-tenants|\
+            self-service-idp|go-app-template|hashicorp-vault|external-secrets-operator|\
+            kyverno|kyverno-policies|*-db|vault|external-secrets|monitoring|grafana|prometheus|\
+            kube-prometheus-stack|grafana-dashboards)
+              echo "Error: '$SERVICE' is a reserved name and cannot be deleted."
+              echo "Error: '$SERVICE' is a reserved name and cannot be deleted." >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+              ;;
+          esac
+          if ! gh repo view "rcarlson-devops/${SERVICE}" --json name > /dev/null 2>&1; then
+            echo "WARN: rcarlson-devops/${SERVICE} does not exist"
+            echo "WARN: rcarlson-devops/${SERVICE} does not exist" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if ! gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp &> /dev/null; then
+            echo "WARN: Tenant ${SERVICE} not present"
+            echo "WARN: Tenant ${SERVICE} not present" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Validate Step Succeeded" >> "$GITHUB_STEP_SUMMARY"
+  delete_tenant_items:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SERVICE: ${{ inputs.service }}
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v7
+      - name: Delete items and commit/push
+        run: |
+          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp &> /dev/null; then
+            rm -rf "argocd/tenants/${SERVICE}"
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "Remove argocd/tenants/${SERVICE}"
+            git pull --rebase
+            git push origin HEAD:main
+            echo "Removed argocd/tenants/${SERVICE}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Skipping tenant deletion as it is not present" >> $GITHUB_STEP_SUMMARY
+          fi
+  delete_github_repo:
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
+      SERVICE: ${{ inputs.service }}
+    steps:
+      - name: Delete Repo
+        run: |
+          if gh repo view "rcarlson-devops/${SERVICE}" --json name > /dev/null 2>&1; then
+            gh repo delete "rcarlson-devops/${SERVICE}" --yes
+            echo "Deleted Github Repo: rcarlson-devops/${SERVICE}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Skipped Repo deletion. Repo not present" >> $GITHUB_STEP_SUMMARY    
+          fi
+  delete_ghcr_package:
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PKG_DELETE_PAT }}
+      SERVICE: ${{ inputs.service }}
+    steps:
+      - name: Delete GHCR Package
+        run: |
+          if gh api "/user/packages/container/${SERVICE}" > /dev/null 2>&1; then
+            gh api -X DELETE "/user/packages/container/${SERVICE}"
+            echo "Deleted /user/packages/container/${SERVICE}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Skipping package deletion. It does not exist" >> $GITHUB_STEP_SUMMARY
+          fi
