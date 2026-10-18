@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "app.fullname" . }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "app.labels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: {{ include "app.name" . }}
+          image: "{{ .Values.image.repository }}:{{ required "image.tag must be set; see environments/<env>/values-<env>.yaml" .Values.image.tag }}@{{ required "image.digest must be set; see environments/<env>/values-<env.yaml" .Values.image.digest }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.probes.port }}
+          env:
+            # Depends on the Crossplane Composition's names: postgres-db-rw and <n>-db.
+            # If either name changes, DB_HOST breaks 
+            - name: DB_HOST
+              value: "postgres-db-rw.{{ .Release.Name }}-db.svc.cluster.local"
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.secretName }}
+                  key: dbname
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.secretName }}
+                  key: password
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.secretName }}
+                  key: username
+            - name: ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: PORT
+              value: {{ .Values.probes.port | quote }}
+            - name: PRESTOP_DELAY_SECONDS
+              value: {{ .Values.lifecycle.preStopSleepSeconds | quote }}            
+            - name: SHUTDOWN_TIMEOUT_SECONDS
+              value: {{ .Values.shutdownTimeoutSeconds | quote }}
+          # Uses httpGet rather than exec: the runtime image is distroless
+          # and has no shell or `sleep` binary, so an exec-based preStop
+          # would silently do nothing. Calling the app's own
+          # /internal/prestop endpoint gets the same delay with no shell
+          # dependency — see server.go's handlePreStop.
+          lifecycle:
+            preStop:
+              httpGet:
+                path: /internal/prestop
+                port: {{ .Values.probes.port }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readinessPath }}
+              port: {{ .Values.probes.port }}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.livenessPath }}
+              port: {{ .Values.probes.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}

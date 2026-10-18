@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "app.fullname" . }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: "{{ include "app.fullname" . }}.localhost"
+      http:
+        paths:
+          - path: "/"
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "app.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}

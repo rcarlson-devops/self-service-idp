@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: metrics
+  labels:
+    release: kube-prometheus-stack
+spec:
+  endpoints:
+    - interval: 60s
+      port: http
+      path: /metrics
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: "{{ include "app.name" . }}"
+      app.kubernetes.io/instance: "{{ .Release.Name }}"

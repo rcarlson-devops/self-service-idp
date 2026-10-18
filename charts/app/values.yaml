@@ -1,0 +1,54 @@
+replicaCount: 1
+
+image:
+  repository: ""
+  # Deliberately empty: there is no sensible chart-wide default. Every image is
+  # an immutable sha-<short-sha> tag, set per environment in
+  # environments/<env>/values-<env>.yaml (CI updates it on each build).
+  # Rendering without a tag fails with an error instead of deploying a bad image.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+environment: dev
+
+service:
+  port: 80
+  targetPort: 8080
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    cpu: 200m
+    memory: 64Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+probes:
+  livenessPath: /healthz
+  readinessPath: /readyz
+  port: 8080
+
+# Must match/exceed what the app is told via SHUTDOWN_TIMEOUT_SECONDS below,
+# plus the preStop sleep, plus a small buffer — otherwise Kubernetes kills
+# the pod before the app finishes draining in-flight requests.
+shutdownTimeoutSeconds: 10
+lifecycle:
+  preStopSleepSeconds: 5
+terminationGracePeriodSeconds: 20
+
+# Extra labels applied to every resource, e.g. for the Kyverno
+# "must have a cost-center label" policy from Phase 4.
+extraLabels:
+  cost-center: platform-eng
+
+database:
+  # Name of kubernetes secret holding the database credentials. Created by KSO (External Secrets Operator)
+  secretName: db-credentials
