@@ -1,0 +1,12 @@
+# Inherit all production dependencies
+-r requirements.txt
+
+# --- Core Testing Utililties ---
+pytest==9.1.1
+requests-mock==1.12.1
+
+# --- Transitive Dependencies (Pytest Runner Engine ---
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.7.0
+Pygments==2.21.0
