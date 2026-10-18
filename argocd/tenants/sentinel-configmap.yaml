@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-sentinel
+  namespace: argocd # Or the namespace where your master app or tenants reside
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    description: "Sentinel placeholder to prevent ArgoCD empty-directory sync errors during tenant decommissioning."
+data:
+  placeholder: "true"

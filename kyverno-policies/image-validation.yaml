@@ -1,0 +1,36 @@
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: image-check
+spec:
+  failurePolicy: Fail
+  validationActions:
+    - Deny
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ['']
+        apiVersions: ['v1']
+        operations: ['CREATE']
+        resources: ['pods']
+  matchImageReferences:
+    - glob: ghcr.io/rcarlson-devops/*
+  attestors:
+    - name: cosign
+      cosign:
+        keyless:
+          identities:
+            - subjectRegExp: '^https://github.com/rcarlson-devops/.+/\.github/workflows/.+@refs/heads/main$'
+              issuer: 'https://token.actions.githubusercontent.com'
+        ctlog:
+          url: "https://rekor.sigstore.dev"
+  attestations:
+    - name: cosignAttestation
+      intoto:
+        type: https://cyclonedx.org/bom
+  validations:
+    - expression: >-
+        images.containers.map(image, verifyImageSignatures(image, [attestors.cosign])).all(e, e > 0)
+      message: "Failed to verify the image signature"
+    - expression: >-
+        images.containers.map(image, verifyAttestationSignatures(image, attestations.cosignAttestation, [attestors.cosign])).all(e, e > 0)
+      message: "Failed to verify signature on the image's SBOM attestation"

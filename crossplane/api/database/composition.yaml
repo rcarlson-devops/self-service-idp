@@ -1,0 +1,241 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: database-composition
+spec:
+  compositeTypeRef:
+    apiVersion: rcarlsondevops.org/v1alpha1
+    kind: PostgresDatabase
+  mode: Pipeline
+  pipeline:
+    - step: create-a-namespace
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: "{{ .observed.composite.resource.metadata.name }}-db"
+              labels:
+                team: "{{ .observed.composite.resource.spec.team }}"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: namespace
+    - step: create-default-deny-net-policy
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: default-deny
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: default-deny            
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              policyTypes: ["Ingress"]
+              podSelector:
+    - step: create-allow-service-net-policy
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: allow-service
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: allow-service
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              policyTypes: ["Ingress"]
+              podSelector:
+              ingress:
+                - from:
+                    - namespaceSelector:
+                        matchLabels:
+                          kubernetes.io/metadata.name: "{{ .observed.composite.resource.metadata.name }}"
+                  ports:
+                    - port: 5432
+                      protocol: "TCP"
+    - step: create-allow-inter-namespace-net-policy
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: allow-inter-namespace
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: inter-namespace
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              policyTypes: ["Ingress"]
+              podSelector:
+              ingress:
+                - from:
+                    - namespaceSelector:
+                        matchLabels:
+                          kubernetes.io/metadata.name: "{{ .observed.composite.resource.metadata.name }}-db"
+                  ports:
+                    - port: 5432
+                      protocol: "TCP"
+                    - port: 8000
+                      protocol: "TCP"
+    - step: create-allow-cnpg-net-policy
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata:
+              name: allow-cnpg
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: allow-cnpg
+                gotemplating.fn.crossplane.io/ready: "True"
+            spec:
+              policyTypes: ["Ingress"]
+              podSelector:
+              ingress:
+                - from:
+                    - namespaceSelector:
+                        matchLabels:
+                          kubernetes.io/metadata.name: cnpg-system
+                  ports:
+                    - port: 8000
+                      protocol: "TCP"                      
+    - step: create-a-postgres-database
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: postgresql.cnpg.io/v1
+            kind: Cluster
+            metadata:
+              name: postgres-db
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+              labels:
+                team: "{{ .observed.composite.resource.spec.team }}"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: postgres-instance
+            spec:
+              instances: {{ .observed.composite.resource.spec.instances }}
+              storage:
+                {{- $sizeDict := dict "small" "1Gi" "medium" "2Gi" "large" "3Gi" }}
+                size: "{{ get $sizeDict .observed.composite.resource.spec.size }}"
+    - step: create-a-pushsecret
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: external-secrets.io/v1alpha1
+            kind: PushSecret
+            metadata:
+              name: db-credentials
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: pushsecret
+            spec:
+              deletionPolicy: Delete
+              secretStoreRefs:
+                - name: vault-backend
+                  kind: ClusterSecretStore
+              selector:
+                secret:
+                  name: postgres-db-app
+              data:
+                - match:
+                    secretKey: password
+                    remoteRef:
+                      remoteKey: "tenants/{{ .observed.composite.resource.metadata.name }}/db"
+                      property: password
+                - match:
+                    secretKey: username
+                    remoteRef:
+                      remoteKey: "tenants/{{ .observed.composite.resource.metadata.name }}/db"
+                      property: username
+                - match:
+                    secretKey: dbname
+                    remoteRef:
+                      remoteKey: "tenants/{{ .observed.composite.resource.metadata.name }}/db"
+                      property: dbname
+    - step: create-cluster-rolebinding
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            metadata:
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+              name: team-edit
+              labels:
+                team: "{{ .observed.composite.resource.spec.team }}"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: rolebinding
+                gotemplating.fn.crossplane.io/ready: "True"
+            subjects:
+              - kind: Group
+                name: "{{ .observed.composite.resource.spec.team }}"
+            roleRef:
+              kind: ClusterRole
+              name: edit
+              apiGroup: rbac.authorization.k8s.io
+    - step: auto-detect-ready-composed-resources
+      functionRef:
+        name: auto-ready
+    - step: sequence-creation
+      functionRef:
+        name: function-sequencer
+      input:
+        apiVersion: sequencer.fn.crossplane.io/v1beta1
+        kind: Input
+        rules:
+          - sequence:
+              - namespace
+              - default-deny
+              - allow-service
+              - inter-namespace
+              - allow-cnpg
+              - postgres-instance
+              - pushsecret
+              - rolebinding

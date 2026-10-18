@@ -1,0 +1,25 @@
+alertmanager:
+  enabled: false
+grafana:
+  enabled: true
+  defaultDashboardsEnabled: false
+  label: grafana_dashboard
+  labelValue: "1"
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 1Gi
+prometheus:
+  prometheusSpec:
+    retention: 6h
+    retentionSize: "3GiB"
+    serviceMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
