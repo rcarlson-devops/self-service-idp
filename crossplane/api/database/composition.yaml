@@ -154,10 +154,10 @@ spec:
               storage:
                 {{- $sizeDict := dict "small" "1Gi" "medium" "2Gi" "large" "3Gi" }}
                 size: "{{ get $sizeDict .observed.composite.resource.spec.size }}"
-              pg_hba:
-                - hostnossl all all all reject
-                - hostssl all all all md5
-
+              postgresql:
+                pg_hba:
+                  - hostnossl all all all reject
+                  - hostssl all all all md5
     - step: create-a-pushsecret
       functionRef:
         name: go-templating
