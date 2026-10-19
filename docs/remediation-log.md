@@ -58,3 +58,21 @@ All Kyverno Deployments have succesfully completed and are healthy.
  Baseline smoke verification checks completed successfully!
 ==========================================================
 ```
+
+## Phase 1: Cryptographic Boundaries & Supply Chain Hardening
+
+### Step 1.1: Enforce Server-Side Database TLS
+*   **Date:** October 18, 2026
+*   **Status:** In Progress
+*   **Source Branch:** develop
+*   **Target Branch:** feature/1.1-database-tls
+
+#### Executed Actions
+1. Configured an automated, distinct Crossplane `PushSecret` pipeline step to replicate the self-signed CloudNativePG root CA (`postgres-db-ca`, key `ca.crt`) directly into HashiCorp Vault.
+2. Formulated an application-side `ExternalSecret` manifest asset inside the shared application Helm chart to pull down certificate values into tenant execution boundaries.
+3. Updated the application deployment templates to mount the `db-ca` payload as an uncorrupted, file-backed PEM certificate file at `/etc/pg-ca/ca.crt`.
+4. Injected an un-bypassable server-side `hostnossl all all all reject` blocking rule at the top of the database cluster's Host-Based Authentication (`pg_hba`) configuration array.
+5. Refactored the central GitHub Actions workflow pipeline to dynamic branch targets (`HEAD:${{ github.ref_name }}`) and added explicit ref tracking to the checkout step to protect `main` during feature branch runs.
+
+#### Verification Evidence
+*Pending sandbox tenant compilation execution run.*
