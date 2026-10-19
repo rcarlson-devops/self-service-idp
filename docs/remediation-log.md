@@ -29,3 +29,32 @@ Changes to be committed:
 \$ git push -u origin feature/0.1-baseline
 Branch 'feature/0.1-baseline' set up to track remote branch 'feature/0.1-baseline' from 'origin'.
 ```
+
+### Step 0.2: Develop the Automation Integrity Smoke Script
+*   **Date:** October 18, 2026
+*   **Status:** Completed
+*   **Source Branch:** develop
+*   **Target Branch:** feature/0.2-smokescript
+
+#### Executed Actions
+1. Formulated a unified platform readiness automation validation layout at `scripts/smoke.sh`.
+2. Structured array-driven loop checks to assert readiness across Vault status, Crossplane Functions conditions, Kyverno deployments, and all core Argo CD infrastructure applications.
+
+#### Verification Evidence
+```text
+\$ ./scripts/smoke.sh
+==========================================================
+ Running Infrastructure Smoke Test...
+==========================================================
+Checking Vault Health and Unseal State...
+Vault is unsealed and healthy.
+Checking ArgoCD Application Health...
+All ArgoCD Applications Confirmed Healthy
+Verifying Crossplane Functions Status
+All Crossplane Functions confirmed Healthy.
+Verifying Kyverno Deployment Health
+All Kyverno Deployments have succesfully completed and are healthy.
+==========================================================
+ Baseline smoke verification checks completed successfully!
+==========================================================
+```
