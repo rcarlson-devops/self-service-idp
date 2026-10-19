@@ -44,6 +44,11 @@ for application in "${applications[@]}"; do
     if [[ "$(kubectl get application "$application" -n argocd -o jsonpath="{.status.health.status}")" != "Healthy" ]]; then
         echo "$application is not in a healthy state. Please investigate"
         exit 1
+    else
+        if [[ "$(kubectl get application "$application" -n argocd -o jsonpath="{.status.sync.status}")" != "Synced" ]]; then
+            echo "$application is not synced. Please investigate"
+            exit 1
+        fi
     fi
 done
 echo "All ArgoCD Applications Confirmed Healthy"
