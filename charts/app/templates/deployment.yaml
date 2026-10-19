@@ -21,6 +21,10 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.probes.port }}
+          volumeMounts:
+            - name: db-ca-volume
+              mountPath: /etc/pg-ca
+              readOnly: true
           env:
             # Depends on the Crossplane Composition's names: postgres-db-rw and <n>-db.
             # If either name changes, DB_HOST breaks 
@@ -75,3 +79,7 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+      volumes:
+        - name: db-ca-volume
+          secret:
+            secretName: db-ca

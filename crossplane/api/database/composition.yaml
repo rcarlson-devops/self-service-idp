@@ -154,6 +154,10 @@ spec:
               storage:
                 {{- $sizeDict := dict "small" "1Gi" "medium" "2Gi" "large" "3Gi" }}
                 size: "{{ get $sizeDict .observed.composite.resource.spec.size }}"
+              postgresql:
+                pg_hba:
+                  - hostnossl all all all reject
+                  - hostssl all all all md5
     - step: create-a-pushsecret
       functionRef:
         name: go-templating
@@ -194,6 +198,36 @@ spec:
                     remoteRef:
                       remoteKey: "tenants/{{ .observed.composite.resource.metadata.name }}/db"
                       property: dbname
+    - step: create-a-pushsecret-ca
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: external-secrets.io/v1alpha1
+            kind: PushSecret
+            metadata:
+              name: db-ca-push
+              namespace: "{{ .observed.composite.resource.metadata.name }}-db"
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: ca-pushsecret
+            spec:
+              deletionPolicy: Delete
+              secretStoreRefs:
+                - name: vault-backend
+                  kind: ClusterSecretStore
+              selector:
+                secret:
+                  name: postgres-db-ca
+              data:
+                - match:
+                    secretKey: ca.crt
+                    remoteRef:
+                      remoteKey: "tenants/{{ .observed.composite.resource.metadata.name }}/ca"
+                      property: ca.crt        
     - step: create-cluster-rolebinding
       functionRef:
         name: go-templating
@@ -238,4 +272,5 @@ spec:
               - allow-cnpg
               - postgres-instance
               - pushsecret
+              - ca-pushsecret
               - rolebinding
