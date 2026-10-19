@@ -48,7 +48,7 @@ jobs:
             echo "WARN: rcarlson-devops/${SERVICE} does not exist"
             echo "WARN: rcarlson-devops/${SERVICE} does not exist" >> "$GITHUB_STEP_SUMMARY"
           fi
-          if ! gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp &> /dev/null; then
+          if ! gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp --ref "${{ github.ref_name }}" &> /dev/null; then
             echo "WARN: Tenant ${SERVICE} not present"
             echo "WARN: Tenant ${SERVICE} not present" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -61,19 +61,22 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SERVICE: ${{ inputs.service }}
+      REF: ${{ github.ref_name }}
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
       - name: Delete items and commit/push
         run: |
-          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp &> /dev/null; then
+          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp --ref "${{ github.ref_name }}" &> /dev/null; then
             rm -rf "argocd/tenants/${SERVICE}"
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
             git add .
             git commit -m "Remove argocd/tenants/${SERVICE}"
             git pull --rebase
-            git push origin HEAD:main
+            git push origin "HEAD:${REF}"
             echo "Removed argocd/tenants/${SERVICE}" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "Skipping tenant deletion as it is not present" >> $GITHUB_STEP_SUMMARY

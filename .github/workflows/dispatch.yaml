@@ -83,7 +83,7 @@ jobs:
             echo "rcarlson-devops/${SERVICE} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp &> /dev/null; then
+          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp --ref "${{ github.ref_name }}" &> /dev/null; then
             echo "Tenant ${SERVICE} already exists"
             echo "Tenant ${SERVICE} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
@@ -118,6 +118,7 @@ jobs:
       INSTANCES: ${{ inputs.instances }}
       SERVICE: ${{ inputs.service }}
       SIZE: ${{ inputs.size }}
+      REF: ${{ github.ref_name }}
     steps:
       - name: Poll new repo for commit
         env:
@@ -143,6 +144,8 @@ jobs:
           done          
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
       - name: Create new tenants directory
         run: mkdir "./argocd/tenants/${SERVICE}" 
       - name: Copy application.yaml.tmpl to tenants
@@ -179,5 +182,5 @@ jobs:
           git add "./argocd/tenants/${SERVICE}/application.yaml" "./argocd/tenants/${SERVICE}/database.yaml"
           git commit -m "Add application and database manifests for service ${SERVICE}"
           git pull --rebase
-          git push origin HEAD:main
+          git push origin "HEAD:${REF}"
           echo "**argocd/tenants/${SERVICE}/application.yaml and database.yaml committed and pushed" >> "$GITHUB_STEP_SUMMARY"
