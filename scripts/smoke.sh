@@ -26,7 +26,7 @@ tracker() {
 vault_check() {
     local VAULT_SEALED
  
-    VAULT_SEALED=$(kubectl exec -n vault vault-0 -- vault status -format=json 2>/dev/null | jq -r '.sealed' || echo "unknown")
+    VAULT_SEALED=$(kubectl exec -n vault vault-0 -- vault status -format=json 2>/dev/null | jq -r '.sealed')
 
     if [ "$VAULT_SEALED" = "true" ]; then
         echo "CRITICAL ERROR: Vault is sealed! Orchestration blocked."
