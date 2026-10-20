@@ -114,7 +114,7 @@ kyverno_check() {
     local deployment
 
     for deployment in "${deployments[@]}"; do
-        if ! kubectl rollout status deployment/"${deployment}" -n kyverno > /dev/null 2>&1; then
+        if ! kubectl rollout status deployment/"${deployment}" --timeout=60s -n kyverno > /dev/null 2>&1; then
             echo "$deployment has not completed successfully. Please investigate"
             return 1
         fi
