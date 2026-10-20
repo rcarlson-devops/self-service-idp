@@ -1,0 +1,8 @@
+apiVersion: rcarlsondevops.org/v1alpha1
+kind: PostgresDatabase
+metadata:
+  name: remediation-test-1
+spec:
+  team: dev-team-test
+  instances: 1
+  size: small
