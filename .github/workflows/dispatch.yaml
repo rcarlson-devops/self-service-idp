@@ -3,23 +3,23 @@ on:
   workflow_dispatch:
     inputs:
       team:
-        description: 'The team name responsible for the new service'
+        description: "The team name responsible for the new service"
         required: true
         type: string
       service:
-        description: 'The name of the service being deployed'
+        description: "The name of the service being deployed"
         required: true
         type: string
       instances:
-        description: 'The number of database instances to deploy'
+        description: "The number of database instances to deploy"
         required: true
         type: choice
         options:
-          - '1'
-          - '2'
-          - '3'
+          - "1"
+          - "2"
+          - "3"
       size:
-        description: 'The size of the database to deploy'
+        description: "The size of the database to deploy"
         required: true
         type: choice
         options:
@@ -30,13 +30,20 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT}}
       INSTANCES: ${{ inputs.instances }}
       SERVICE: ${{ inputs.service }}
       SIZE: ${{ inputs.size }}
       TEAM: ${{ inputs.team }}
     steps:
+      - name: Create GitHub App Token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.IDP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.IDP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
       - name: Validate inputs
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           if [[ ! "$SERVICE" =~ ^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$ ]]; then
             echo "Error: Service name must be alphanumeric and can include hyphens, but cannot start or end with a hyphen."
@@ -78,12 +85,12 @@ jobs:
               exit 1
               ;;
           esac
-          if gh repo view "rcarlson-devops/${SERVICE}" --json name > /dev/null 2>&1; then
-            echo "rcarlson-devops/${SERVICE} already exists"
-            echo "rcarlson-devops/${SERVICE} already exists" >> "$GITHUB_STEP_SUMMARY"
+          if gh repo view "rcarlson-platform/${SERVICE}" --json name > /dev/null 2>&1; then
+            echo "rcarlson-platform/${SERVICE} already exists"
+            echo "rcarlson-platform/${SERVICE} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp --ref "${{ github.ref_name }}" &> /dev/null; then
+          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-platform/self-service-idp --ref "${{ github.ref_name }}" &> /dev/null; then
             echo "Tenant ${SERVICE} already exists"
             echo "Tenant ${SERVICE} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
@@ -93,19 +100,26 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     env:
-      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
       SERVICE: ${{ inputs.service }}
     steps:
+      - name: Create GitHub App Token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.IDP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.IDP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
       - name: deploy
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
             -H "X-Github-Api-Version: 2026-03-10" \
-            "/repos/rcarlson-devops/go-app-template/generate" \
+            "/repos/rcarlson-platform/go-app-template/generate" \
             -f name="${SERVICE}" \
             -F private=false
-          echo "rcarlson-devops/${SERVICE} created" >> "$GITHUB_STEP_SUMMARY"
+          echo "rcarlson-platform/${SERVICE} created" >> "$GITHUB_STEP_SUMMARY"
   populate_tenants:
     runs-on: ubuntu-latest
     needs: deploy_new_repo
@@ -120,13 +134,19 @@ jobs:
       SIZE: ${{ inputs.size }}
       REF: ${{ github.ref_name }}
     steps:
+      - name: Create GitHub App Token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.IDP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.IDP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
       - name: Poll new repo for commit
         env:
           FILE_PATH: "environments/dev/values-dev.yaml"
-          GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           OUTPUT_PATH: "values-dev.yaml"
           POLL_INTERVAL: 10
-          REPO: "rcarlson-devops/${{ inputs.service }}"
+          REPO: "rcarlson-platform/${{ inputs.service }}"
         timeout-minutes: 5
         run: |
           gh --version
@@ -141,13 +161,13 @@ jobs:
             fi
             echo "Values not pushed... Waiting $POLL_INTERVAL"
             sleep "$POLL_INTERVAL"
-          done          
+          done
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
           ref: ${{ github.ref_name }}
       - name: Create new tenants directory
-        run: mkdir "./argocd/tenants/${SERVICE}" 
+        run: mkdir "./argocd/tenants/${SERVICE}"
       - name: Copy application.yaml.tmpl to tenants
         run: cp "./self-service/templates/application.yaml.tmpl" "./argocd/tenants/${SERVICE}/application.yaml"
       - name: Copy database.yaml.tmpl to tenants
@@ -156,7 +176,7 @@ jobs:
         run: |
           yq --version
           yq -i '(.metadata.name) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/application.yaml"
-          yq -i '(.spec.sources[] | select(.ref == "values")).repoURL = "https://github.com/rcarlson-devops/" + strenv(SERVICE) + ".git"' "./argocd/tenants/${SERVICE}/application.yaml"
+          yq -i '(.spec.sources[] | select(.ref == "values")).repoURL = "https://github.com/rcarlson-platform/" + strenv(SERVICE) + ".git"' "./argocd/tenants/${SERVICE}/application.yaml"
           yq -i '(.spec.destination.namespace) = strenv(SERVICE)' "./argocd/tenants/${SERVICE}/application.yaml"
           yq -i '(.spec.sources[] | select(.path == "charts/app")).helm.parameters += [{"name": "extraLabels.team", "value": strenv(TEAM)}]' "./argocd/tenants/${SERVICE}/application.yaml"
       - name: Replace placeholders in database.yaml
@@ -174,7 +194,7 @@ jobs:
               echo "$BLANKS"
               exit 1
             fi
-          done          
+          done
       - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
