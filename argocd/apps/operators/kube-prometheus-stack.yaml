@@ -15,7 +15,7 @@ spec:
         releaseName: kube-prometheus-stack
         valueFiles:
           - $values/kube-prometheus-stack/dev-values.yaml
-    - repoURL: https://github.com/rcarlson-devops/self-service-idp.git
+    - repoURL: https://github.com/rcarlson-platform/self-service-idp.git
       targetRevision: main
       ref: values
   destination:
