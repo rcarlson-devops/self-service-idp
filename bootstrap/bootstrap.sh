@@ -46,7 +46,7 @@ fi
 if grep -rq 'git@github.com' argocd/ 2>/dev/null; then
   echo "WARNING: argocd/ manifests use an SSH repoURL. Argo CD will not be able to" >&2
   echo "         sync on a fresh cluster without a registered deploy key. Switch to" >&2
-  echo "         https://github.com/rcarlson-devops/self-service-idp.git (public repo)." >&2
+  echo "         https://github.com/rcarlson-platform/self-service-idp.git (public repo)." >&2
 fi
 
 echo "==> 1/5 k3d cluster"

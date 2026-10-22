@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/rcarlson-devops/self-service-idp.git
+    repoURL: https://github.com/rcarlson-platform/self-service-idp.git
     targetRevision: main
     path: argocd/apps
     directory:

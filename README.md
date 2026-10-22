@@ -181,7 +181,7 @@ flowchart LR
 
 Every service image is built in its own repository's CI, scanned with Trivy, signed with cosign and given a CycloneDX SBOM attestation. Signing is keyless: the signature is tied to the workflow's GitHub OIDC identity and recorded in public Sigstore. Signing and attestation use the image digest, and the Deployment references the image by tag and digest.
 
-Kyverno enforces the signature in the cluster. The `kyverno-policies` Argo CD Application (sync wave 1, after Kyverno at wave 0) syncs `kyverno-policies/`, which holds one `ImageValidatingPolicy`, `image-check`. The policy applies when pods are created, checks images under `ghcr.io/rcarlson-devops/`, and passes an image only if it has a valid signature and a signed CycloneDX SBOM attestation, both from a workflow on `main` of a repository under the `rcarlson-devops` account. One policy covers every generated repository, because the identity is matched by pattern and not by repository name.
+Kyverno enforces the signature in the cluster. The `kyverno-policies` Argo CD Application (sync wave 1, after Kyverno at wave 0) syncs `kyverno-policies/`, which holds one `ImageValidatingPolicy`, `image-check`. The policy applies when pods are created, checks images under `ghcr.io/rcarlson-platform/`, and passes an image only if it has a valid signature and a signed CycloneDX SBOM attestation, both from a workflow on `main` of a repository under the `rcarlson-platform` account. One policy covers every generated repository, because the identity is matched by pattern and not by repository name.
 
 The policy ran in Audit first (violations reported, nothing blocked) and was then switched to Deny. A signed image passes. An unsigned image under the registry path is rejected at admission:
 
@@ -399,7 +399,7 @@ On WSL2 the cluster needs more memory than I expected: memory in use peaked at 7
 **1. Clone the repo**
 
 ```bash
-git clone https://github.com/rcarlson-devops/self-service-idp.git
+git clone https://github.com/rcarlson-platform/self-service-idp.git
 cd self-service-idp
 ```
 
@@ -487,8 +487,8 @@ Rolling that image out is done by an Application in `argocd/tenants/` that combi
 - Network isolation covers the service and database namespaces only. The platform's own namespaces (Argo CD, Vault, External Secrets, Crossplane, CloudNativePG, Kyverno) have no policies. In the database namespace only incoming traffic is restricted: outgoing traffic from the database pods is not, and the namespace has no quota or default resource requests, because the database pod declares none. In the service namespace the incoming rules are the ones for Traefik and Prometheus; incoming traffic from other sources was not tested. Container metrics from the kubelet reach Prometheus with `default-deny` in place.
 - The quota is the same for every service: 4 pods, 200m and 128Mi of requests, 800m and 256Mi of limits. A pod that declares no requests and limits is rejected, so the chart has to set them. A service that needs more has to change the shared chart, which changes every service.
 - The network policies and the quota come from the shared chart, so they reach a service on the next sync. A service created before they existed received them the same way.
-- Image verification accepts a signature and attestation from any repository under the `rcarlson-devops` account: the policy matches the signing workflow's identity with a pattern, so any workflow on `main` in any of them can produce an image that passes.
-- Only images under `ghcr.io/rcarlson-devops/` are checked. Images from other registries are not verified.
+- Image verification accepts a signature and attestation from any repository under the `rcarlson-platform` account: the policy matches the signing workflow's identity with a pattern, so any workflow on `main` in any of them can produce an image that passes.
+- Only images under `ghcr.io/rcarlson-platform/` are checked. Images from other registries are not verified.
 - The template's CI references `aquasecurity/trivy-action` at `@master`, not at a version or commit, in three steps (the file-system scan, the image scan and the SBOM). A change on that branch changes what runs in every generated repository's CI. The other actions are pinned to a major version, and `cosign-installer` to `v4.1.2`.
 - The image policy's webhook fails closed. If Kyverno cannot be reached, creating pods is rejected in every namespace except `kyverno` and `kube-system`, which includes the platform's own namespaces. Kyverno's namespace is excluded so it can restart itself. This case has not been tested.
 - Admission checks run when a pod is created. Pods that are already running are reported on by Kyverno's background scan but are not stopped.
