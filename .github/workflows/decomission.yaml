@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       service:
-        description: 'Name of the tenant repo and resources to be deleted'
+        description: "Name of the tenant repo and resources to be deleted"
         required: true
         type: string
       confirm:
-        description: 'Re-enter name of the tenant repo and resources to be deleted for confirmation'
+        description: "Re-enter name of the tenant repo and resources to be deleted for confirmation"
         required: true
         type: string
 jobs:
@@ -44,11 +44,11 @@ jobs:
               exit 1
               ;;
           esac
-          if ! gh repo view "rcarlson-devops/${SERVICE}" --json name > /dev/null 2>&1; then
-            echo "WARN: rcarlson-devops/${SERVICE} does not exist"
-            echo "WARN: rcarlson-devops/${SERVICE} does not exist" >> "$GITHUB_STEP_SUMMARY"
+          if ! gh repo view "${GITHUB_REPOSITORY_OWNER}/${SERVICE}" --json name > /dev/null 2>&1; then
+            echo "WARN: ${GITHUB_REPOSITORY_OWNER}/${SERVICE} does not exist"
+            echo "WARN: ${GITHUB_REPOSITORY_OWNER}/${SERVICE} does not exist" >> "$GITHUB_STEP_SUMMARY"
           fi
-          if ! gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp --ref "${{ github.ref_name }}" &> /dev/null; then
+          if ! gh repo read-dir "argocd/tenants/${SERVICE}" --repo "${GITHUB_REPOSITORY}" --ref "${{ github.ref_name }}" &> /dev/null; then
             echo "WARN: Tenant ${SERVICE} not present"
             echo "WARN: Tenant ${SERVICE} not present" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -69,7 +69,7 @@ jobs:
           ref: ${{ github.ref_name }}
       - name: Delete items and commit/push
         run: |
-          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo rcarlson-devops/self-service-idp --ref "${{ github.ref_name }}" &> /dev/null; then
+          if gh repo read-dir "argocd/tenants/${SERVICE}" --repo "${GITHUB_REPOSITORY}" --ref "${{ github.ref_name }}" &> /dev/null; then
             rm -rf "argocd/tenants/${SERVICE}"
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -85,14 +85,22 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.REPO_CREATOR_PAT }}
       SERVICE: ${{ inputs.service }}
     steps:
+      - name: Create GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.IDP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.IDP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
       - name: Delete Repo
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          if gh repo view "rcarlson-devops/${SERVICE}" --json name > /dev/null 2>&1; then
-            gh repo delete "rcarlson-devops/${SERVICE}" --yes
-            echo "Deleted Github Repo: rcarlson-devops/${SERVICE}" >> $GITHUB_STEP_SUMMARY
+          if gh repo view "${GITHUB_REPOSITORY_OWNER}/${SERVICE}" --json name > /dev/null 2>&1; then
+            gh repo delete "${GITHUB_REPOSITORY_OWNER}/${SERVICE}" --yes
+            echo "Deleted Github Repo: ${GITHUB_REPOSITORY_OWNER}/${SERVICE}" >> $GITHUB_STEP_SUMMARY
           else
             echo "Skipped Repo deletion. Repo not present" >> $GITHUB_STEP_SUMMARY    
           fi
@@ -105,9 +113,9 @@ jobs:
     steps:
       - name: Delete GHCR Package
         run: |
-          if gh api "/user/packages/container/${SERVICE}" > /dev/null 2>&1; then
-            gh api -X DELETE "/user/packages/container/${SERVICE}"
-            echo "Deleted /user/packages/container/${SERVICE}" >> $GITHUB_STEP_SUMMARY
+          if gh api "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${SERVICE}" > /dev/null 2>&1; then
+            gh api -X DELETE "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${SERVICE}"
+            echo "Deleted /orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${SERVICE}" >> $GITHUB_STEP_SUMMARY
           else
             echo "Skipping package deletion. It does not exist" >> $GITHUB_STEP_SUMMARY
           fi
