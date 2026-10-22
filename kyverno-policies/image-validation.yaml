@@ -13,13 +13,13 @@ spec:
         operations: ['CREATE']
         resources: ['pods']
   matchImageReferences:
-    - glob: ghcr.io/rcarlson-devops/*
+    - glob: ghcr.io/rcarlson-platform/*
   attestors:
     - name: cosign
       cosign:
         keyless:
           identities:
-            - subjectRegExp: '^https://github.com/rcarlson-devops/.+/\.github/workflows/.+@refs/heads/main$'
+            - subjectRegExp: '^https://github.com/rcarlson-platform/.+/\.github/workflows/.+@refs/heads/main$'
               issuer: 'https://token.actions.githubusercontent.com'
         ctlog:
           url: "https://rekor.sigstore.dev"
