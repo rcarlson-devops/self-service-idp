@@ -98,3 +98,27 @@ jobs:
             echo "kubeconform checked no resources; the folder list or the render is wrong" >&2
             exit 1
           fi
+
+  manifests:
+    name: manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install kube-linter v0.8.3 and verify its hash
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://github.com/stackrox/kube-linter/releases/download/v0.8.3/kube-linter-linux.tar.gz
+          echo "1a6d8419b11971372971fdbc22682b684ebfb7cf1c39591662d1b6ca736c41df  kube-linter-linux.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf kube-linter-linux.tar.gz -C "$RUNNER_TEMP/bin" kube-linter
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Render the chart with tenant-shaped values
+        run: helm template charts/app -f charts/app/ci/values-tenant.yaml > "$RUNNER_TEMP/rendered.yaml"
+      - name: Lint the rendered manifests
+        run: |
+          grep -q '^kind:' "$RUNNER_TEMP/rendered.yaml"
+          kube-linter lint "$RUNNER_TEMP/rendered.yaml"
