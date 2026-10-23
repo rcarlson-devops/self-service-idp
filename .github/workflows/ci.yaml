@@ -3,56 +3,98 @@ name: CI
 on: pull_request
 
 permissions:
-    contents: read
+  contents: read
 
 concurrency:
-    group: ci-${{ github.ref }}
-    cancel-in-progress: true
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-    yamllint:
-        name: yamllint
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        steps:
-            - name: Check out the repository
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  persist-credentials: false
-            - name: Lint YAML
-              run: pipx run --spec yamllint==1.38.0 yamllint -c .yamllint.yaml .
+  yamllint:
+    name: yamllint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint YAML
+        run: pipx run --spec yamllint==1.38.0 yamllint -c .yamllint.yaml .
 
-    shellcheck:
-        name: shellcheck
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        steps:
-            - name: Check out the repository
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  persist-credentials: false
-            - name: Lint shell scripts
-              run: shellcheck bootstrap/bootstrap.sh scripts/smoke.sh tests/abuse/run.sh
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint shell scripts
+        run: shellcheck bootstrap/bootstrap.sh scripts/smoke.sh tests/abuse/run.sh
 
-    chart:
-        name: chart
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        steps:
-            - name: Check out the repository
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  persist-credentials: false
-            - name: Print Helm Version
-              run: helm version --short
-            - name: Helm Lint the Chart
-              run: helm lint charts/app -f charts/app/ci/values-tenant.yaml
-            - name: Helm Template the Chart successfully
-              run: helm template charts/app -f charts/app/ci/values-tenant.yaml > /dev/null
-            - name: Verify chart refuses to render without an image tag
-              run: |
-                  if output=$(helm template charts/app 2>&1); then
-                      echo "helm template succeeded with no values; the image.tag guard did not trigger."
-                      exit 1
-                  fi
-                  printf '%s\n' "$output" | grep -q 'image.tag must be set'
+  chart:
+    name: chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Print Helm Version
+        run: helm version --short
+      - name: Helm Lint the Chart
+        run: helm lint charts/app -f charts/app/ci/values-tenant.yaml
+      - name: Helm Template the Chart successfully
+        run: helm template charts/app -f charts/app/ci/values-tenant.yaml > /dev/null
+      - name: Verify chart refuses to render without an image tag
+        run: |
+          if output=$(helm template charts/app 2>&1); then
+              echo "helm template succeeded with no values; the image.tag guard did not trigger."
+              exit 1
+          fi
+          printf '%s\n' "$output" | grep -q 'image.tag must be set'
+
+  schemas:
+    name: schemas
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install kubeconform v0.8.0 and verify its checksum
+        run: |
+          base=https://github.com/yannh/kubeconform/releases/download/v0.8.0
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/kubeconform-linux-amd64.tar.gz"
+          curl -fsSLO "$base/CHECKSUMS"
+          grep 'kubeconform-linux-amd64.tar.gz' CHECKSUMS | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf kubeconform-linux-amd64.tar.gz -C "$RUNNER_TEMP/bin" kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Render the chart with tenant-shaped values
+        run: helm template charts/app -f charts/app/ci/values-tenant.yaml > "$RUNNER_TEMP/rendered.yaml"
+      - name: Validate the manifests and the rendered chart against schemas
+        env:
+          CATALOG_SHA: f3e4382095909ac60000da025f323ba44d4c738a
+        run: |
+          status=0
+          kubeconform -strict -summary \
+            -ignore-filename-pattern '-values\.yaml$' \
+            -schema-location default \
+            -schema-location "https://raw.githubusercontent.com/datreeio/CRDs-catalog/${CATALOG_SHA}/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
+            argocd crossplane ingress vault-backend kyverno-policies \
+            kube-prometheus-stack grafana-dashboards \
+            "$RUNNER_TEMP/rendered.yaml" > "$RUNNER_TEMP/kc.out" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/kc.out"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          if ! grep -Eq 'Summary: [1-9][0-9]* resources? found' "$RUNNER_TEMP/kc.out"; then
+            echo "kubeconform checked no resources; the folder list or the render is wrong" >&2
+            exit 1
+          fi
