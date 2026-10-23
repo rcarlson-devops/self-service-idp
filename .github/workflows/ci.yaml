@@ -1,0 +1,35 @@
+name: CI
+
+on: pull_request
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    yamllint:
+        name: yamllint
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Check out the repository
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - name: Lint YAML
+              run: pipx run --spec yamllint==1.38.0 yamllint -c .yamllint.yaml .
+
+    shellcheck:
+        name: shellcheck
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Check out the repository
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - name: Lint shell scripts
+              run: shellcheck bootstrap/bootstrap.sh scripts/smoke.sh tests/abuse/run.sh

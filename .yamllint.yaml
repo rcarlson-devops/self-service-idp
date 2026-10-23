@@ -1,0 +1,13 @@
+extends: relaxed
+
+ignore: |
+  .venv/
+  .pytest_cache/
+  charts/app/templates/
+  self-service/templates/
+
+rules:
+  line-length: disable
+  document-start: disable
+  truthy:
+    check-keys: false
