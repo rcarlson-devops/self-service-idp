@@ -40,7 +40,7 @@ spec:
               name: default-deny
               namespace: "{{ .observed.composite.resource.metadata.name }}-db"
               annotations:
-                gotemplating.fn.crossplane.io/composition-resource-name: default-deny            
+                gotemplating.fn.crossplane.io/composition-resource-name: default-deny
                 gotemplating.fn.crossplane.io/ready: "True"
             spec:
               policyTypes: ["Ingress"]
@@ -130,7 +130,7 @@ spec:
                           kubernetes.io/metadata.name: cnpg-system
                   ports:
                     - port: 8000
-                      protocol: "TCP"                      
+                      protocol: "TCP"
     - step: create-a-postgres-database
       functionRef:
         name: go-templating
@@ -227,7 +227,7 @@ spec:
                     secretKey: ca.crt
                     remoteRef:
                       remoteKey: "tenants/{{ .observed.composite.resource.metadata.name }}/ca"
-                      property: ca.crt        
+                      property: ca.crt
     - step: create-cluster-rolebinding
       functionRef:
         name: go-templating
