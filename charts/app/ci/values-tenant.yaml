@@ -1,0 +1,6 @@
+replicaCount: 1
+environment: dev
+image:
+  repository: ghcr.io/rcarlson-platform/placholder-service
+  tag: sha-aaaaaaa
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
