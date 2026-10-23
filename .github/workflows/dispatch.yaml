@@ -68,7 +68,7 @@ jobs:
           fi
           case "$TEAM" in
             dev-team-?*) ;;
-            *) 
+            *)
               echo "Error: team must start with dev-team-"
               echo "Error: team must start with dev-team-" >> "$GITHUB_STEP_SUMMARY"
               exit 1
@@ -95,7 +95,7 @@ jobs:
             echo "Tenant ${SERVICE} already exists"
             echo "Tenant ${SERVICE} already exists" >> "$GITHUB_STEP_SUMMARY"
             exit 1
-          fi         
+          fi
           echo "Validate Step Succeeded" >> "$GITHUB_STEP_SUMMARY"
   deploy_new_repo:
     runs-on: ubuntu-latest

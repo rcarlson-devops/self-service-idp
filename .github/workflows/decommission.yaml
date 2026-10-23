@@ -102,7 +102,7 @@ jobs:
             gh repo delete "${GITHUB_REPOSITORY_OWNER}/${SERVICE}" --yes
             echo "Deleted Github Repo: ${GITHUB_REPOSITORY_OWNER}/${SERVICE}" >> $GITHUB_STEP_SUMMARY
           else
-            echo "Skipped Repo deletion. Repo not present" >> $GITHUB_STEP_SUMMARY    
+            echo "Skipped Repo deletion. Repo not present" >> $GITHUB_STEP_SUMMARY
           fi
   delete_ghcr_package:
     needs: validate
