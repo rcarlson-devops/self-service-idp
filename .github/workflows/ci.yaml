@@ -33,3 +33,26 @@ jobs:
                   persist-credentials: false
             - name: Lint shell scripts
               run: shellcheck bootstrap/bootstrap.sh scripts/smoke.sh tests/abuse/run.sh
+
+    chart:
+        name: chart
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Check out the repository
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - name: Print Helm Version
+              run: helm version --short
+            - name: Helm Lint the Chart
+              run: helm lint charts/app -f charts/app/ci/values-tenant.yaml
+            - name: Helm Template the Chart successfully
+              run: helm template charts/app -f charts/app/ci/values-tenant.yaml > /dev/null
+            - name: Verify chart refuses to render without an image tag
+              run: |
+                  if output=$(helm template charts/app 2>&1); then
+                      echo "helm template succeeded with no values; the image.tag guard did not trigger."
+                      exit 1
+                  fi
+                  printf '%s\n' "$output" | grep -q 'image.tag must be set'
