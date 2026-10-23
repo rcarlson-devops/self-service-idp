@@ -7,65 +7,54 @@ Order matters: do the GitHub setup first, then bootstrap the cluster, which also
 ## Prerequisites
 
 - Docker, `k3d` and `kubectl` installed and working.
-- A GitHub account that owns two repositories: this one (`self-service-idp`) and the template repo (`go-app-template`).
+- A free GitHub organization that owns two repositories: this one (`self-service-idp`) and the template repo (`go-app-template`).
 - The GitHub CLI (`gh`) and `yq` (the mikefarah/Go version, v4) if you want to run the checks in this guide locally. Two unrelated tools are both called `yq`; check with `yq --version` that yours says `mikefarah/yq`.
 - `pass` (the Linux password store) set up with a GPG key. The bootstrap keeps Vault's root token and unseal keys there, and it runs `pass ls` first, so it stops early if `pass` does not work. Back up the GPG key (see Known limits).
 - Python 3 with the `venv` module, for the Vault setup script (`bootstrap/scripts/src/configure_vault.py`). On Debian and Ubuntu that module is the separate `python3-venv` package. `bootstrap.sh` creates a virtual environment in `.venv` at the repo root and installs `bootstrap/scripts/requirements.txt` into it with `pip`, so the machine needs access to PyPI. Before it builds the cluster, the script tests that a virtual environment can be created, and stops with a message if not.
 - Local port 18200 free. The Vault setup reaches `vault-0` through `kubectl port-forward` on that port, not through Traefik. The script checks that the port is free before it builds the cluster.
 - On WSL2, enough memory. Memory in use peaked at 7.2 to 7.8 GiB during a build. My laptop has an Intel Core i7-1260P and 16 GB of RAM, and my `.wslconfig` sets `memory=10GB` and `swap=8GB`. Before I raised the limit the machine froze during a build; I believe it ran out of memory but did not confirm it. Close VS Code windows attached to WSL before `wsl --shutdown`, or they keep `vmmemWSL` alive.
 
-## 1. Create the template repo
+## 1. Create the organization and the template repo
 
-The form creates every new service from a template repository, so it must exist first.
+The form creates every new service from a template repository, and the workflows create and delete repositories with a GitHub App. An App installation token cannot create repositories under a personal account, so the repositories live in a free GitHub organization (here `rcarlson-platform`).
 
-1. Create a **public** repository named `go-app-template` under your account.
-2. Push the template contents: the `app/` folder (Go source and tests, `go.mod`, `go.sum`, `Dockerfile`, a README), `environments/dev/values-dev.yaml`, `.github/workflows/build-and-push.yml`, a README and a `.gitignore`. Both `go.mod` and `go.sum` must be committed: the Docker build copies them, and the build fails without `go.sum`.
-3. In the repo, open **Settings > General** and tick **Template repository**.
-4. Disable the build workflow **on the template repo itself** (Actions tab, select the workflow, choose Disable). This stops the template publishing its own image.
+1. Create a free GitHub organization.
+2. Create or transfer two repositories into it: this one (`self-service-idp`) and the template repo, a **public** repository named `go-app-template`. After a transfer GitHub redirects the old URLs, but still search the repo for the old account name with `git grep` and replace every match (image path, Kyverno policy, Argo CD Application sources, docs).
+3. In the organization's settings, allow public packages (under Packages; I believe the path is **Settings > Packages**, but check the current GitHub UI). Without this you cannot make a service's image package public, and the image policy fetches signatures anonymously, so a private package makes the deploy fail closed (observed: Kyverno could not verify the signature and the pod was refused). Each new service's package is also created private and must be switched to public by hand after its first build; see Known limits.
+4. Push the template contents: the `app/` folder (Go source and tests, `go.mod`, `go.sum`, `Dockerfile`, a README), `environments/dev/values-dev.yaml`, `.github/workflows/build-and-push.yml`, a README and a `.gitignore`. Both `go.mod` and `go.sum` must be committed: the Docker build copies them, and the build fails without `go.sum`.
+5. In the template repo, open **Settings > General** and tick **Template repository**.
+6. Disable the build workflow **on the template repo itself** (Actions tab, select the workflow, choose Disable). This stops the template publishing its own image.
    - Disabling it here does **not** stop the copy inside each generated repo, which is what you want: generated repos build their own images.
-5. Confirm it is pushed: run `git fetch && git status -sb` inside the clone. You want `## main...origin/main` with no `ahead` or `behind` marker.
+7. Confirm it is pushed: run `git fetch && git status -sb` inside the clone. You want `## main...origin/main` with no `ahead` or `behind` marker.
 
-## 2. Create the access token (PAT)
+## 2. Create the GitHub App
 
-The workflow needs a token that can create repositories from the template. The built-in `GITHUB_TOKEN` cannot do this (it is scoped to the repo the workflow runs in), so you create a personal access token.
+The workflows need a token that can create repositories from the template and delete them again. The built-in `GITHUB_TOKEN` cannot do this (it is scoped to the repo the workflow runs in), and a personal access token is long-lived and tied to a person. So the workflows use a GitHub App: each run mints an installation token from the App's private key, and that token is short-lived (GitHub documents about an hour).
 
-1. Open **GitHub > Settings > Developer settings > Personal access tokens > Fine-grained tokens** and choose **Generate new token**.
-2. Set:
-   - **Resource owner:** your account.
-   - **Expiration:** no expiry date for now (my choice). In real use, set the shortest expiry that suits you.
-   - **Repository access:** all repositories I own. This is broad; see the trade-off below.
-   - **Permissions:** no user permissions. Repository permissions: read access to code and metadata, and read and write access to administration.
-3. Copy the token **once**, straight into your password manager. Never paste it into a file, a chat, a commit or a shell startup file.
+1. In the organization's settings, open **Developer settings > GitHub Apps** and choose **New GitHub App**.
+2. Give it a name (here `rcarlson-platform-idp`) and any homepage URL. Untick **Webhook > Active**: the App needs no webhook.
+3. Set **Repository permissions**: Administration read and write, Contents read and write, Metadata read-only, Pull requests read and write. Set no organization or account permissions. Administration is needed because the "create a repository from a template" call returns `HTTP 403 Resource not accessible by integration` without it (observed).
+4. Under **Where can this GitHub App be installed**, choose **Only on this account**, then create the App.
+5. Note the **Client ID** (it is not a secret). Use the Client ID, not the App ID: the App-token action's `app-id` input is deprecated in the version used here.
+6. Under **Private keys**, choose **Generate a private key**. GitHub downloads a `.pem` file **once**. The SHA-256 fingerprint shown beside the key is not the key. Put the file's contents into `pass` straight away, then delete the downloaded file. Never paste it into a chat, a commit or a shell startup file.
+7. Open **Install App** and install it on the organization, on **All repositories**.
 
-Why this is a trade-off: a token that can create repositories is broad. It is tied to your account, here it never expires, and it is stored only as an Actions secret. A GitHub App is the at-scale replacement (see the main README's "what's next" section).
+Why this is a trade-off: Administration read and write on every repository in the organization is broad, because a leaked private key could change settings or delete repositories. It replaces a personal token that never expired, and the key sits in `pass` and in one organization secret that only this repo can read.
 
-## 3. Store the token as an Actions secret
+## 3. Store the App credentials as organization secrets
 
-1. In the monorepo, open **Settings > Secrets and variables > Actions**.
-2. Choose **New repository secret**.
-3. Name it `REPO_CREATOR_PAT` (the form workflow reads this exact name) and paste the token.
+Store two organization Actions secrets, visible to this one repository only. Each command prompts for the value, so it stays out of your shell history:
+
+```
+gh secret set IDP_APP_CLIENT_ID --org <your-org> --visibility selected --repos self-service-idp
+pass show <entry> | gh secret set IDP_APP_PRIVATE_KEY --org <your-org> --visibility selected --repos self-service-idp
+```
+
+The second line reads the key from `pass` (use your entry name) and pipes it in. The workflows read exactly these two names. In each job that needs a token, a step runs `actions/create-github-app-token`, pinned to a full commit SHA, with the Client ID, the private key and the organization as the owner. The form also passes the owner explicitly when it creates a repo from the template: without it, GitHub tries to create the repo under the App's own bot identity and returns `HTTP 422 Invalid owner` (observed).
 
 Also make sure the form workflow can write to the repo: it must declare `permissions: contents: write`, because it commits the new service's files to `argocd/tenants/`.
 
-The `decommission` workflow needs a second token to delete the service's image package: a classic personal access token with only the `delete:packages` scope (GitHub adds `read:packages` with it), stored as its own Actions secret. A fine-grained token could not delete packages. The secret's name is in the `decommission` workflow.
-
-### Testing the token from your own terminal (optional)
-
-`gh` reads the token from the `GH_TOKEN` environment variable. Set it for one terminal session only, reading the value from your password manager:
-
-```
-export GH_TOKEN=...      # paste from the password manager, in this session only
-gh api --method POST -H "Accept: application/vnd.github+json" \
-  /repos/<your-account>/go-app-template/generate \
-  -f name=rest-test -F private=false
-unset GH_TOKEN
-```
-
-Notes:
-
-- Use `-F` (not `-f`) for `private` so it is sent as a boolean.
-- Do not add `export GH_TOKEN=...` to `~/.zshrc` or any other startup file.
-- Delete the test repo afterwards, and its package (see "Cleaning up" below).
+The `decommission` workflow uses the same App token to delete the service's repository. Deleting the image package needs a different credential. GitHub's package API documentation says managing packages needs a classic personal access token (I did not test whether an App token can delete a package). Create a classic token with only the `delete:packages` scope (GitHub adds `read:packages` with it), give it an expiry (90 days here) and put a calendar reminder two weeks before it ends, then store it as the repository Actions secret `PKG_DELETE_PAT`. It is the only personal token in the workflows. A fine-grained token could not delete packages.
 
 ## 4. Bootstrap the cluster
 
@@ -459,7 +448,8 @@ What production would do differently (none of this is built):
 | Generated services and database requests | `argocd/tenants/<service>/` |
 | Blueprints the form fills in | `self-service/templates/` (never synced by Argo) |
 | Shared Helm chart | `charts/app/` |
-| Secret for repo creation | Actions secret `REPO_CREATOR_PAT` |
+| GitHub App credentials for creating and deleting repos | Organization Actions secrets `IDP_APP_CLIENT_ID` and `IDP_APP_PRIVATE_KEY` (the key is also in `pass`) |
+| Token for deleting image packages | Repository Actions secret `PKG_DELETE_PAT` (classic, `delete:packages`, 90-day expiry) |
 | Vault unseal keys and initial root token | `pass` only (`infrastructure/vault/`), never in Git |
 | Vault configuration (KV engine, Kubernetes auth, policy `eso`, role `eso`) | Inside Vault only; `bootstrap.sh` applies it again on every run |
 | Tenant secrets in Vault | `secret/tenants/<service>/db` |
@@ -475,14 +465,19 @@ Removing a service is a Git change, and Argo CD prunes automatically, so **delet
 1. Delete `argocd/tenants/<service>/` (keep `argocd/tenants/.gitkeep` and the `tenants-sentinel` ConfigMap; Argo CD will not prune an Application down to nothing, so the sentinel is the manifest that always remains), commit and push.
 2. Wait for the next Argo poll, then confirm it is gone: `kubectl get applications -n argocd` and `kubectl get postgresdatabase`.
 3. Delete the service's GitHub repository.
-4. Delete its container package separately. A package is not removed with its repository (profile > Packages > the package > Package settings > Danger Zone).
+4. Delete its container package separately. A package is not removed with its repository (organization page > Packages > the package > Package settings > Danger Zone).
+
+The `decommission` workflow does steps 1, 3 and 4 for you; the steps above are the manual fallback. It leaves the service's empty application namespace behind: remove it with `kubectl delete namespace <service>`.
 5. The service's `PushSecret` uses `deletionPolicy: Delete`, so removing the service also removes its Vault entry. Check that it is gone: `vault kv metadata get secret/tenants/<service>/db` should find nothing. If the entry is still there (for example Vault was sealed during the removal), delete it by hand with the root token: `vault kv metadata delete secret/tenants/<service>/db`.
 
 ## Known limits
 
 - Argo CD polls Git every 3 minutes by default, so a new service can take about that long to appear (I measured 133 s and 196 s). A webhook would remove the wait, but a local k3d cluster is not reachable from GitHub.
 - Generated service repositories are public.
-- The repository-creation token is broad, as described in step 2.
+- A service's image package is created private and must be made public by hand after its first build (the package's settings page, Danger Zone, Change visibility). I believe the REST API cannot do this (not checked). Until it is public the deploy is refused. The organization must allow public packages first (step 1).
+- The `decommission` workflow's package check treats any error as "the package does not exist", so a broken token makes the job pass without deleting the package. Check the package afterwards.
+- The GitHub App has Administration read and write on every repository in the organization, as described in step 2.
+- One classic personal access token remains, for deleting image packages (step 3). It expires, so rotate it before the reminder date.
 - Vault is a local approximation of a production deployment. It runs in standalone mode as a single replica, so there is no fault tolerance, and it talks plain HTTP inside the cluster (this version has no TLS).
 - Vault is not auto-unsealed. Production would use auto-unseal backed by a cloud KMS or HSM; that is not available on a local, free-tier setup, and a script that carried the unseal keys itself would defeat the point. `bootstrap.sh` reads them from `pass` at run time, which asks for the GPG passphrase, so a person with the GPG key still has to be there. After every Vault pod restart, someone has to re-run `bootstrap.sh` or unseal by hand.
 - The unseal keys and root token are held by one person in `pass`. All three shares are needed to unseal Vault (three shares, threshold three) and they sit in the same store, so the split adds no protection here. In production the key shares would be split between several people. See "Vault trust model". `pass` encrypts with a GPG key, so back up that key safely: losing it means losing the Vault keys and root token.
